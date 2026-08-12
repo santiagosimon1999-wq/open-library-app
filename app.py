@@ -1,9 +1,27 @@
 import requests
 import streamlit as st
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 
 RESULTS_PER_PAGE = 10
 EDITIONS_TO_SHOW = 5
+
+# Cache API results for 10 minutes
+CACHE_TTL = 600
+
+# First number = time allowed to establish the connection
+# Second number = time allowed while waiting for data
+REQUEST_TIMEOUT = (15, 30)
+
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "open-library-book-search/1.0 "
+        "(learning project)"
+    ),
+    "Accept": "application/json",
+}
 
 
 LANGUAGE_NAMES = {
@@ -39,11 +57,88 @@ LANGUAGE_NAMES = {
 }
 
 
-# -------------------------
-# API functions
-# -------------------------
+AVAILABILITY_STATUS_NAMES = {
+    "open": "Open access",
+    "borrow_available": "Borrow available",
+    "borrow_unavailable": "Borrow unavailable",
+}
 
-def searchbooks(query, search_by, page):
+
+# =========================================================
+# HTTP SESSION
+# =========================================================
+
+def create_http_session():
+    retry_strategy = Retry(
+        total=2,
+        connect=2,
+        read=2,
+        status=2,
+        backoff_factor=1,
+        status_forcelist=[
+            429,
+            500,
+            502,
+            503,
+            504,
+        ],
+        allowed_methods=frozenset(
+            ["GET"]
+        ),
+        respect_retry_after_header=True,
+    )
+
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy
+    )
+
+    session = requests.Session()
+
+    session.headers.update(
+        REQUEST_HEADERS
+    )
+
+    session.mount(
+        "https://",
+        adapter
+    )
+
+    session.mount(
+        "http://",
+        adapter
+    )
+
+    return session
+
+
+HTTP_SESSION = create_http_session()
+
+
+# =========================================================
+# API FUNCTIONS
+# =========================================================
+
+def api_get(url, params=None):
+    response = HTTP_SESSION.get(
+        url,
+        params=params,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+@st.cache_data(
+    ttl=CACHE_TTL,
+    show_spinner=False
+)
+def searchbooks(
+    query,
+    search_by,
+    page
+):
     url = "https://openlibrary.org/search.json"
 
     if search_by == "Title":
@@ -52,6 +147,7 @@ def searchbooks(query, search_by, page):
             "limit": RESULTS_PER_PAGE,
             "page": page,
         }
+
     else:
         params = {
             "author": query,
@@ -65,34 +161,46 @@ def searchbooks(query, search_by, page):
         "public_scan_b,ia,availability"
     )
 
-    response = requests.get(
+    return api_get(
         url,
         params=params,
-        timeout=10
     )
 
-    response.raise_for_status()
 
-    return response.json()
-
-
+@st.cache_data(
+    ttl=CACHE_TTL,
+    show_spinner=False
+)
 def get_work_details(work_key):
-    work_id = work_key.rstrip("/").split("/")[-1]
-
-    url = f"https://openlibrary.org/works/{work_id}.json"
-
-    response = requests.get(
-        url,
-        timeout=10
+    work_id = (
+        work_key
+        .rstrip("/")
+        .split("/")[-1]
     )
 
-    response.raise_for_status()
+    url = (
+        f"https://openlibrary.org/"
+        f"works/{work_id}.json"
+    )
 
-    return response.json()
+    return api_get(
+        url
+    )
 
 
-def get_work_editions(work_key, limit=EDITIONS_TO_SHOW):
-    work_id = work_key.rstrip("/").split("/")[-1]
+@st.cache_data(
+    ttl=CACHE_TTL,
+    show_spinner=False
+)
+def get_work_editions(
+    work_key,
+    limit=EDITIONS_TO_SHOW
+):
+    work_id = (
+        work_key
+        .rstrip("/")
+        .split("/")[-1]
+    )
 
     url = (
         f"https://openlibrary.org/works/"
@@ -103,19 +211,20 @@ def get_work_editions(work_key, limit=EDITIONS_TO_SHOW):
         "limit": limit
     }
 
-    response = requests.get(
+    return api_get(
         url,
         params=params,
-        timeout=10
     )
 
-    response.raise_for_status()
 
-    return response.json()
-
+# =========================================================
+# HELPER FUNCTIONS
+# =========================================================
 
 def get_description(work_data):
-    description = work_data.get("description")
+    description = work_data.get(
+        "description"
+    )
 
     if isinstance(description, dict):
         return description.get(
@@ -129,25 +238,80 @@ def get_description(work_data):
     return "No description available."
 
 
-def get_availability_text(book):
-    availability = book.get("availability") or {}
+def get_availability_details(book):
+    availability = book.get(
+        "availability"
+    ) or {}
 
-    if availability.get("is_readable"):
-        return "Readable online"
+    if not availability:
+        return None
 
-    if availability.get("is_lendable"):
-        return "Available to borrow"
+    status_code = availability.get(
+        "status",
+        "unknown"
+    )
 
-    if availability.get("status") == "open":
-        return "Open access"
+    status_name = AVAILABILITY_STATUS_NAMES.get(
+        status_code,
+        status_code.replace(
+            "_",
+            " "
+        ).title()
+    )
 
-    if book.get("public_scan_b"):
-        return "Public scan available"
+    readable = bool(
+        availability.get(
+            "is_readable"
+        )
+    )
 
-    if book.get("has_fulltext"):
-        return "Full text available"
+    lendable = bool(
+        availability.get(
+            "is_lendable"
+        )
+    )
 
-    return "No digital availability found."
+    previewable = bool(
+        availability.get(
+            "is_previewable"
+        )
+    )
+
+    browseable = bool(
+        availability.get(
+            "available_to_browse"
+        )
+        or availability.get(
+            "is_browseable"
+        )
+    )
+
+    waitlist = bool(
+        availability.get(
+            "available_to_waitlist"
+        )
+    )
+
+    edition_id = availability.get(
+        "openlibrary_edition"
+    )
+
+    return {
+        "status": status_name,
+        "readable": readable,
+        "lendable": lendable,
+        "previewable": previewable,
+        "browseable": browseable,
+        "waitlist": waitlist,
+        "edition_id": edition_id,
+    }
+
+
+def yes_or_no(value):
+    if value:
+        return "Yes"
+
+    return "No"
 
 
 def get_edition_language(edition):
@@ -159,13 +323,16 @@ def get_edition_language(edition):
     language_names = []
 
     for language in languages:
+
         if isinstance(language, dict):
+
             language_key = language.get(
                 "key",
                 ""
             )
 
             if language_key:
+
                 language_code = (
                     language_key
                     .split("/")[-1]
@@ -182,7 +349,9 @@ def get_edition_language(edition):
                 )
 
     if language_names:
-        return ", ".join(language_names)
+        return ", ".join(
+            language_names
+        )
 
     return "Unknown"
 
@@ -200,9 +369,48 @@ def get_edition_isbn(edition):
     return "Unknown"
 
 
-# -------------------------
-# Session state
-# -------------------------
+def show_request_error(error):
+    if isinstance(
+        error,
+        requests.exceptions.Timeout
+    ):
+        st.error(
+            "Open Library took too long "
+            "to respond after several attempts."
+        )
+
+    elif isinstance(
+        error,
+        requests.exceptions.ConnectionError
+    ):
+        st.error(
+            "A connection error occurred "
+            "while contacting Open Library."
+        )
+
+    elif isinstance(
+        error,
+        requests.exceptions.HTTPError
+    ):
+        st.error(
+            "Open Library returned an HTTP error."
+        )
+
+    else:
+        st.error(
+            "Something went wrong while "
+            "contacting Open Library."
+        )
+
+    # Keep this while we are developing.
+    st.caption(
+        f"Technical error: {error}"
+    )
+
+
+# =========================================================
+# SESSION STATE
+# =========================================================
 
 if "page" not in st.session_state:
     st.session_state.page = 1
@@ -246,6 +454,7 @@ if (
     # -------------------------
 
     if st.session_state.scroll_to_details:
+
         st.html(
             """
             <script>
@@ -273,19 +482,30 @@ if (
     # Back button
     # -------------------------
 
-    if st.button("← Back to Results"):
+    if st.button(
+        "← Back to Results"
+    ):
+
         st.session_state.view = "search"
+
         st.session_state.selected_book = None
+
         st.session_state.scroll_to_results = True
+
         st.rerun()
 
 
-    work_key = book.get("key")
+    work_key = book.get(
+        "key"
+    )
 
     if not work_key:
+
         st.error(
-            "This book does not have an Open Library Work ID."
+            "This book does not have "
+            "an Open Library Work ID."
         )
+
         st.stop()
 
 
@@ -295,9 +515,14 @@ if (
         # Work details
         # -------------------------
 
-        work_data = get_work_details(
-            work_key
-        )
+        with st.spinner(
+            "Loading book details..."
+        ):
+
+            work_data = get_work_details(
+                work_key
+            )
+
 
         title = book.get(
             "title",
@@ -338,8 +563,10 @@ if (
             []
         )
 
-        availability_text = get_availability_text(
-            book
+        availability_details = (
+            get_availability_details(
+                book
+            )
         )
 
 
@@ -348,20 +575,29 @@ if (
         # -------------------------
 
         editions = []
-        editions_error = False
+
+        editions_error = None
 
         try:
-            editions_data = get_work_editions(
-                work_key
-            )
+
+            with st.spinner(
+                "Loading editions..."
+            ):
+
+                editions_data = (
+                    get_work_editions(
+                        work_key
+                    )
+                )
 
             editions = editions_data.get(
                 "entries",
                 []
             )
 
-        except requests.exceptions.RequestException:
-            editions_error = True
+        except requests.exceptions.RequestException as error:
+
+            editions_error = error
 
 
         # -------------------------
@@ -372,6 +608,7 @@ if (
             [1, 2],
             vertical_alignment="center"
         )
+
 
         with col1:
 
@@ -388,6 +625,7 @@ if (
                 )
 
             else:
+
                 st.write(
                     "No cover available"
                 )
@@ -459,20 +697,136 @@ if (
             "Availability"
         )
 
-        if (
-            availability_text
-            == "No digital availability found."
-        ):
 
-            st.info(
-                availability_text
-            )
+        if not availability_details:
+
+            if (
+                book.get("public_scan_b")
+                or book.get("has_fulltext")
+            ):
+
+                st.info(
+                    "Digital content exists, "
+                    "but detailed availability "
+                    "was not returned."
+                )
+
+            else:
+
+                st.info(
+                    "No digital availability "
+                    "information found."
+                )
+
 
         else:
 
-            st.success(
-                availability_text
+            st.write(
+                "**Status:** "
+                f"{availability_details['status']}"
             )
+
+
+            (
+                read_col,
+                preview_col,
+                borrow_col,
+                browse_col,
+            ) = st.columns(4)
+
+
+            with read_col:
+
+                st.write(
+                    "**Read online**"
+                )
+
+                st.write(
+                    yes_or_no(
+                        availability_details[
+                            "readable"
+                        ]
+                    )
+                )
+
+
+            with preview_col:
+
+                st.write(
+                    "**Preview**"
+                )
+
+                st.write(
+                    yes_or_no(
+                        availability_details[
+                            "previewable"
+                        ]
+                    )
+                )
+
+
+            with borrow_col:
+
+                st.write(
+                    "**Borrowing**"
+                )
+
+                st.write(
+                    yes_or_no(
+                        availability_details[
+                            "lendable"
+                        ]
+                    )
+                )
+
+
+            with browse_col:
+
+                st.write(
+                    "**Browse**"
+                )
+
+                st.write(
+                    yes_or_no(
+                        availability_details[
+                            "browseable"
+                        ]
+                    )
+                )
+
+
+            if availability_details["waitlist"]:
+
+                st.write(
+                    "**Waitlist:** Available"
+                )
+
+
+            availability_edition = (
+                availability_details[
+                    "edition_id"
+                ]
+            )
+
+
+            if availability_edition:
+
+                availability_edition_id = (
+                    availability_edition
+                    .rstrip("/")
+                    .split("/")[-1]
+                )
+
+                availability_url = (
+                    "https://openlibrary.org/"
+                    f"books/"
+                    f"{availability_edition_id}"
+                )
+
+                st.link_button(
+                    "Open available edition",
+                    availability_url
+                )
 
 
         # -------------------------
@@ -483,17 +837,26 @@ if (
             "Editions"
         )
 
+
         if editions_error:
 
             st.warning(
-                "Edition information could not be loaded."
+                "Edition information "
+                "could not be loaded."
             )
+
+            st.caption(
+                f"Technical error: "
+                f"{editions_error}"
+            )
+
 
         elif not editions:
 
             st.info(
                 "No edition information available."
             )
+
 
         else:
 
@@ -535,8 +898,10 @@ if (
                     "Unknown"
                 )
 
-                language = get_edition_language(
-                    edition
+                language = (
+                    get_edition_language(
+                        edition
+                    )
                 )
 
                 isbn = get_edition_isbn(
@@ -569,15 +934,18 @@ if (
                     )
 
                     st.write(
-                        f"**Published:** {publish_date}"
+                        f"**Published:** "
+                        f"{publish_date}"
                     )
 
                     st.write(
-                        f"**Publisher:** {publisher}"
+                        f"**Publisher:** "
+                        f"{publisher}"
                     )
 
                     st.write(
-                        f"**Format:** {physical_format}"
+                        f"**Format:** "
+                        f"{physical_format}"
                     )
 
                     st.write(
@@ -585,7 +953,8 @@ if (
                     )
 
                     st.write(
-                        f"**Language:** {language}"
+                        f"**Language:** "
+                        f"{language}"
                     )
 
                     st.write(
@@ -600,6 +969,7 @@ if (
                     edition_key = edition.get(
                         "key"
                     )
+
 
                     if edition_key:
 
@@ -637,11 +1007,10 @@ if (
         )
 
 
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as error:
 
-        st.error(
-            "Something went wrong while loading "
-            "the book details."
+        show_request_error(
+            error
         )
 
 
@@ -659,13 +1028,18 @@ st.title(
 
 search_by = st.selectbox(
     "Search by",
-    ["Title", "Author"]
+    [
+        "Title",
+        "Author"
+    ]
 )
 
 
 query = st.text_input(
     "Search",
-    placeholder="Enter a book title or author"
+    placeholder=(
+        "Enter a book title or author"
+    )
 )
 
 
@@ -673,15 +1047,20 @@ query = st.text_input(
 # Search button
 # -------------------------
 
-if st.button("Search"):
+if st.button(
+    "Search"
+):
 
     clean_query = query.strip()
+
 
     if not clean_query:
 
         st.warning(
-            "Please enter something to search."
+            "Please enter something "
+            "to search."
         )
+
 
     else:
 
@@ -708,11 +1087,16 @@ if st.session_state.searched:
 
     try:
 
-        data = searchbooks(
-            st.session_state.query,
-            st.session_state.search_by,
-            st.session_state.page,
-        )
+        with st.spinner(
+            "Searching Open Library..."
+        ):
+
+            data = searchbooks(
+                st.session_state.query,
+                st.session_state.search_by,
+                st.session_state.page,
+            )
+
 
         books = data.get(
             "docs",
@@ -787,7 +1171,8 @@ if st.session_state.searched:
             st.write(
                 f"Page {st.session_state.page} "
                 f"of {total_pages} "
-                f"— {total_results:,} results found"
+                f"— {total_results:,} "
+                f"results found"
             )
 
 
@@ -931,9 +1316,8 @@ if st.session_state.searched:
                     st.rerun()
 
 
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as error:
 
-        st.error(
-            "Something went wrong while connecting "
-            "to Open Library. Please try again."
+        show_request_error(
+            error
         )
