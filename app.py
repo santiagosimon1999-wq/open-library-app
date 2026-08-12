@@ -398,6 +398,74 @@ def get_authors_text(
     return authors_text
 
 
+def get_book_key(book):
+    book_key = book.get(
+        "key"
+    )
+
+    if book_key:
+        return book_key
+
+    title = book.get(
+        "title",
+        "Unknown"
+    )
+
+    authors = book.get(
+        "author_name",
+        []
+    )
+
+    authors_text = "|".join(
+        authors
+    )
+
+    return (
+        f"{title}|{authors_text}"
+    )
+
+
+def is_book_saved(book):
+    book_key = get_book_key(
+        book
+    )
+
+    for saved_book in st.session_state.saved_books:
+
+        if get_book_key(
+            saved_book
+        ) == book_key:
+
+            return True
+
+    return False
+
+
+def save_book(book):
+    if not is_book_saved(
+        book
+    ):
+
+        st.session_state.saved_books.append(
+            book
+        )
+
+
+def remove_saved_book(book):
+    book_key = get_book_key(
+        book
+    )
+
+    st.session_state.saved_books = [
+        saved_book
+        for saved_book
+        in st.session_state.saved_books
+        if get_book_key(
+            saved_book
+        ) != book_key
+    ]
+
+
 def get_edition_language(edition):
     languages = edition.get(
         "languages",
@@ -522,6 +590,68 @@ if "scroll_to_details" not in st.session_state:
 if "load_editions" not in st.session_state:
     st.session_state.load_editions = False
 
+if "saved_books" not in st.session_state:
+    st.session_state.saved_books = []
+
+if "details_return_view" not in st.session_state:
+    st.session_state.details_return_view = "search"
+
+
+# =========================================================
+# SIDEBAR NAVIGATION
+# =========================================================
+
+with st.sidebar:
+
+    st.title(
+        "Open Library"
+    )
+
+    st.caption(
+        "Navigation"
+    )
+
+
+    if st.button(
+        "Search Books",
+        use_container_width=True
+    ):
+
+        st.session_state.view = "search"
+
+        st.session_state.selected_book = None
+
+        st.session_state.load_editions = False
+
+        st.rerun()
+
+
+    saved_count = len(
+        st.session_state.saved_books
+    )
+
+
+    if st.button(
+        f"Saved Books ({saved_count})",
+        use_container_width=True
+    ):
+
+        st.session_state.view = "saved"
+
+        st.session_state.selected_book = None
+
+        st.session_state.load_editions = False
+
+        st.rerun()
+
+
+    st.divider()
+
+    st.caption(
+        "Saved books are stored "
+        "for the current session."
+    )
+
 
 # =========================================================
 # BOOK DETAILS VIEW
@@ -568,17 +698,43 @@ if (
     # Back button
     # -------------------------
 
-    if st.button(
-        "← Back to Results"
+    if (
+        st.session_state.details_return_view
+        == "saved"
     ):
 
-        st.session_state.view = "search"
+        back_label = (
+            "← Back to Saved Books"
+        )
+
+    else:
+
+        back_label = (
+            "← Back to Results"
+        )
+
+
+    if st.button(
+        back_label
+    ):
+
+        return_view = (
+            st.session_state.details_return_view
+        )
+
+        st.session_state.view = (
+            return_view
+        )
 
         st.session_state.selected_book = None
 
         st.session_state.load_editions = False
 
-        st.session_state.scroll_to_results = True
+
+        if return_view == "search":
+
+            st.session_state.scroll_to_results = True
+
 
         st.rerun()
 
@@ -730,6 +886,42 @@ if (
                         edition_count,
                         border=True
                     )
+
+
+                # -------------------------
+                # Save / Remove book
+                # -------------------------
+
+                if is_book_saved(
+                    book
+                ):
+
+                    if st.button(
+                        "♥ Remove from Saved",
+                        key="details_remove_saved",
+                        use_container_width=True
+                    ):
+
+                        remove_saved_book(
+                            book
+                        )
+
+                        st.rerun()
+
+                else:
+
+                    if st.button(
+                        "♡ Save Book",
+                        key="details_save_book",
+                        type="primary",
+                        use_container_width=True
+                    ):
+
+                        save_book(
+                            book
+                        )
+
+                        st.rerun()
 
 
         st.write("")
@@ -907,7 +1099,9 @@ if (
                     )
 
 
-                if availability_details["waitlist"]:
+                if availability_details[
+                    "waitlist"
+                ]:
 
                     st.caption(
                         "Waitlist available"
@@ -1197,355 +1391,171 @@ if (
 
 
 # =========================================================
-# SEARCH VIEW
+# SAVED BOOKS VIEW
 # =========================================================
 
-st.title(
-    "Open Library Book Search"
-)
+if st.session_state.view == "saved":
 
-
-# -------------------------
-# Search form
-# -------------------------
-
-with st.form(
-    "search_form"
-):
-
-    search_options = [
-        "Title",
-        "Author",
-        "ISBN",
-    ]
-
-    current_search_index = (
-        search_options.index(
-            st.session_state.search_by
-        )
+    st.title(
+        "Saved Books"
     )
 
-    search_by = st.selectbox(
-        "Search by",
-        search_options,
-        index=current_search_index,
-    )
-
-    query = st.text_input(
-        "Search",
-        value=st.session_state.query,
-        placeholder=(
-            "Enter a book title, "
-            "author, or ISBN"
-        ),
-    )
-
-    search_submitted = (
-        st.form_submit_button(
-            "Search"
-        )
+    st.caption(
+        "Books saved during your current session."
     )
 
 
-# -------------------------
-# Process search
-# -------------------------
+    if not st.session_state.saved_books:
 
-if search_submitted:
-
-    clean_query = query.strip()
-
-
-    if not clean_query:
-
-        st.warning(
-            "Please enter something "
-            "to search."
+        st.info(
+            "You haven't saved any books yet. "
+            "Search for a book and select "
+            "'Save Book' to add it here."
         )
 
 
     else:
 
-        search_is_valid = True
+        st.write(
+            f"**{len(st.session_state.saved_books)} "
+            f"saved book(s)**"
+        )
 
 
-        # -------------------------
-        # ISBN cleanup / validation
-        # -------------------------
-
-        if search_by == "ISBN":
-
-            clean_query = normalize_isbn(
-                clean_query
-            )
-
-            if not is_valid_isbn_format(
-                clean_query
-            ):
-
-                st.warning(
-                    "Please enter a valid "
-                    "ISBN-10 or ISBN-13."
-                )
-
-                search_is_valid = False
-
-
-        # -------------------------
-        # Save valid search
-        # -------------------------
-
-        if search_is_valid:
-
-            st.session_state.query = (
-                clean_query
-            )
-
-            st.session_state.search_by = (
-                search_by
-            )
-
-            st.session_state.page = 1
-
-            st.session_state.searched = True
-
-            st.session_state.scroll_to_results = True
-
-
-# -------------------------
-# Search results
-# -------------------------
-
-if st.session_state.searched:
-
-    try:
-
-        with st.spinner(
-            "Searching Open Library..."
+        for index, book in enumerate(
+            st.session_state.saved_books
         ):
 
-            data = searchbooks(
-                st.session_state.query,
-                st.session_state.search_by,
-                st.session_state.page,
+            title = book.get(
+                "title",
+                "Unknown"
             )
 
-
-        books = data.get(
-            "docs",
-            []
-        )
-
-        total_results = data.get(
-            "numFound",
-            data.get(
-                "num_found",
-                0
-            )
-        )
-
-        total_pages = max(
-            1,
-            (
-                total_results
-                + RESULTS_PER_PAGE
-                - 1
-            )
-            // RESULTS_PER_PAGE
-        )
-
-
-        # -------------------------
-        # Results heading
-        # -------------------------
-
-        st.subheader(
-            f'Results for '
-            f'"{st.session_state.query}"'
-        )
-
-        st.caption(
-            f"Searching by "
-            f"{st.session_state.search_by}"
-        )
-
-
-        if not books:
-
-            st.info(
-                "No books found. "
-                "Try another search."
-            )
-
-
-        else:
-
-            # -------------------------
-            # Scroll to results
-            # -------------------------
-
-            if st.session_state.scroll_to_results:
-
-                current_page = (
-                    st.session_state.page
+            authors_text = (
+                get_authors_text(
+                    book
                 )
+            )
 
-                st.html(
-                    f"""
-                    <div id="results-top-{current_page}"></div>
+            year = book.get(
+                "first_publish_year",
+                "Unknown"
+            )
 
-                    <script>
-                        setTimeout(() => {{
-                            const target =
-                                document.getElementById(
-                                    "results-top-{current_page}"
-                                );
+            edition_count = book.get(
+                "edition_count",
+                "Unknown"
+            )
 
-                            if (target) {{
-                                target.scrollIntoView({{
-                                    behavior: "smooth",
-                                    block: "start"
-                                }});
-                            }}
-                        }}, 250);
-                    </script>
-                    """,
-                    unsafe_allow_javascript=True,
-                )
-
-                st.session_state.scroll_to_results = False
-
-
-            st.write(
-                f"Page {st.session_state.page} "
-                f"of {total_pages} "
-                f"— {total_results:,} "
-                f"results found"
+            cover_id = book.get(
+                "cover_i"
             )
 
 
-            # =================================================
-            # DISPLAY BOOK CARDS
-            # =================================================
-
-            for index, book in enumerate(
-                books
+            with st.container(
+                border=True
             ):
 
-                title = book.get(
-                    "title",
-                    "Unknown"
-                )
-
-                authors_text = (
-                    get_authors_text(
-                        book
+                cover_col, info_col = (
+                    st.columns(
+                        [1, 3.5],
+                        vertical_alignment="center"
                     )
                 )
 
-                year = book.get(
-                    "first_publish_year",
-                    "Unknown"
-                )
 
-                edition_count = book.get(
-                    "edition_count",
-                    "Unknown"
-                )
+                # -------------------------
+                # Cover
+                # -------------------------
 
-                cover_id = book.get(
-                    "cover_i"
-                )
+                with cover_col:
 
+                    if cover_id:
 
-                with st.container(
-                    border=True
-                ):
-
-                    cover_col, info_col = (
-                        st.columns(
-                            [1, 3.5],
-                            vertical_alignment="center"
+                        cover_url = (
+                            "https://covers.openlibrary.org/"
+                            f"b/id/{cover_id}-M.jpg"
                         )
+
+                        st.image(
+                            cover_url,
+                            width=120
+                        )
+
+                    else:
+
+                        st.info(
+                            "No cover"
+                        )
+
+
+                # -------------------------
+                # Saved book info
+                # -------------------------
+
+                with info_col:
+
+                    st.markdown(
+                        f"### {title}"
+                    )
+
+                    st.write(
+                        f"**Author(s):** "
+                        f"{authors_text}"
                     )
 
 
-                    # -------------------------
-                    # Cover
-                    # -------------------------
-
-                    with cover_col:
-
-                        if cover_id:
-
-                            cover_url = (
-                                "https://covers.openlibrary.org/"
-                                f"b/id/{cover_id}-M.jpg"
-                            )
-
-                            st.image(
-                                cover_url,
-                                width=120
-                            )
-
-                        else:
-
-                            st.info(
-                                "No cover"
-                            )
+                    metadata_col1, (
+                        metadata_col2
+                    ) = st.columns(2)
 
 
-                    # -------------------------
-                    # Book information
-                    # -------------------------
+                    with metadata_col1:
 
-                    with info_col:
-
-                        st.markdown(
-                            f"### {title}"
+                        st.metric(
+                            "First published",
+                            year,
+                            border=True
                         )
 
-                        st.write(
-                            f"**Author(s):** "
-                            f"{authors_text}"
+
+                    with metadata_col2:
+
+                        st.metric(
+                            "Editions",
+                            edition_count,
+                            border=True
                         )
 
-                        metadata_col1, (
-                            metadata_col2
-                        ) = st.columns(2)
+
+                    details_col, (
+                        remove_col
+                    ) = st.columns(2)
 
 
-                        with metadata_col1:
-
-                            st.metric(
-                                "First published",
-                                year,
-                                border=True
-                            )
-
-
-                        with metadata_col2:
-
-                            st.metric(
-                                "Editions",
-                                edition_count,
-                                border=True
-                            )
-
+                    with details_col:
 
                         if st.button(
                             "View Details",
                             key=(
-                                f"details_"
-                                f"{st.session_state.page}_"
+                                f"saved_details_"
                                 f"{index}"
                             ),
-                            type="primary"
+                            type="primary",
+                            use_container_width=True
                         ):
 
-                            st.session_state.selected_book = book
+                            st.session_state.selected_book = (
+                                book
+                            )
 
-                            st.session_state.view = "details"
+                            st.session_state.view = (
+                                "details"
+                            )
+
+                            st.session_state.details_return_view = (
+                                "saved"
+                            )
 
                             st.session_state.load_editions = False
 
@@ -1554,53 +1564,503 @@ if st.session_state.searched:
                             st.rerun()
 
 
-                st.write("")
+                    with remove_col:
+
+                        if st.button(
+                            "Remove",
+                            key=(
+                                f"saved_remove_"
+                                f"{index}"
+                            ),
+                            use_container_width=True
+                        ):
+
+                            remove_saved_book(
+                                book
+                            )
+
+                            st.rerun()
 
 
-            # -------------------------
-            # Pagination
-            # -------------------------
+            st.write("")
 
-            previous_col, next_col = st.columns(
-                2
+
+    st.stop()
+
+
+# =========================================================
+# SEARCH VIEW
+# =========================================================
+
+if st.session_state.view == "search":
+
+    st.title(
+        "Open Library Book Search"
+    )
+
+
+    # -------------------------
+    # Search form
+    # -------------------------
+
+    with st.form(
+        "search_form"
+    ):
+
+        search_options = [
+            "Title",
+            "Author",
+            "ISBN",
+        ]
+
+        current_search_index = (
+            search_options.index(
+                st.session_state.search_by
+            )
+        )
+
+        search_by = st.selectbox(
+            "Search by",
+            search_options,
+            index=current_search_index,
+        )
+
+        query = st.text_input(
+            "Search",
+            value=st.session_state.query,
+            placeholder=(
+                "Enter a book title, "
+                "author, or ISBN"
+            ),
+        )
+
+        search_submitted = (
+            st.form_submit_button(
+                "Search"
+            )
+        )
+
+
+    # -------------------------
+    # Process search
+    # -------------------------
+
+    if search_submitted:
+
+        clean_query = query.strip()
+
+
+        if not clean_query:
+
+            st.warning(
+                "Please enter something "
+                "to search."
             )
 
 
-            with previous_col:
+        else:
 
-                if st.button(
-                    "← Previous",
-                    disabled=(
-                        st.session_state.page <= 1
-                    )
+            search_is_valid = True
+
+
+            # -------------------------
+            # ISBN cleanup / validation
+            # -------------------------
+
+            if search_by == "ISBN":
+
+                clean_query = normalize_isbn(
+                    clean_query
+                )
+
+                if not is_valid_isbn_format(
+                    clean_query
                 ):
 
-                    st.session_state.page -= 1
+                    st.warning(
+                        "Please enter a valid "
+                        "ISBN-10 or ISBN-13."
+                    )
 
-                    st.session_state.scroll_to_results = True
-
-                    st.rerun()
+                    search_is_valid = False
 
 
-            with next_col:
+            # -------------------------
+            # Save valid search
+            # -------------------------
 
-                if st.button(
-                    "Next →",
-                    disabled=(
+            if search_is_valid:
+
+                st.session_state.query = (
+                    clean_query
+                )
+
+                st.session_state.search_by = (
+                    search_by
+                )
+
+                st.session_state.page = 1
+
+                st.session_state.searched = True
+
+                st.session_state.scroll_to_results = True
+
+
+    # -------------------------
+    # Search results
+    # -------------------------
+
+    if st.session_state.searched:
+
+        try:
+
+            with st.spinner(
+                "Searching Open Library..."
+            ):
+
+                data = searchbooks(
+                    st.session_state.query,
+                    st.session_state.search_by,
+                    st.session_state.page,
+                )
+
+
+            books = data.get(
+                "docs",
+                []
+            )
+
+            total_results = data.get(
+                "numFound",
+                data.get(
+                    "num_found",
+                    0
+                )
+            )
+
+            total_pages = max(
+                1,
+                (
+                    total_results
+                    + RESULTS_PER_PAGE
+                    - 1
+                )
+                // RESULTS_PER_PAGE
+            )
+
+
+            # -------------------------
+            # Results heading
+            # -------------------------
+
+            st.subheader(
+                f'Results for '
+                f'"{st.session_state.query}"'
+            )
+
+            st.caption(
+                f"Searching by "
+                f"{st.session_state.search_by}"
+            )
+
+
+            if not books:
+
+                st.info(
+                    "No books found. "
+                    "Try another search."
+                )
+
+
+            else:
+
+                # -------------------------
+                # Scroll to results
+                # -------------------------
+
+                if st.session_state.scroll_to_results:
+
+                    current_page = (
                         st.session_state.page
-                        >= total_pages
                     )
+
+                    st.html(
+                        f"""
+                        <div id="results-top-{current_page}"></div>
+
+                        <script>
+                            setTimeout(() => {{
+                                const target =
+                                    document.getElementById(
+                                        "results-top-{current_page}"
+                                    );
+
+                                if (target) {{
+                                    target.scrollIntoView({{
+                                        behavior: "smooth",
+                                        block: "start"
+                                    }});
+                                }}
+                            }}, 250);
+                        </script>
+                        """,
+                        unsafe_allow_javascript=True,
+                    )
+
+                    st.session_state.scroll_to_results = False
+
+
+                st.write(
+                    f"Page {st.session_state.page} "
+                    f"of {total_pages} "
+                    f"— {total_results:,} "
+                    f"results found"
+                )
+
+
+                # =================================================
+                # DISPLAY BOOK CARDS
+                # =================================================
+
+                for index, book in enumerate(
+                    books
                 ):
 
-                    st.session_state.page += 1
+                    title = book.get(
+                        "title",
+                        "Unknown"
+                    )
 
-                    st.session_state.scroll_to_results = True
+                    authors_text = (
+                        get_authors_text(
+                            book
+                        )
+                    )
 
-                    st.rerun()
+                    year = book.get(
+                        "first_publish_year",
+                        "Unknown"
+                    )
+
+                    edition_count = book.get(
+                        "edition_count",
+                        "Unknown"
+                    )
+
+                    cover_id = book.get(
+                        "cover_i"
+                    )
 
 
-    except requests.exceptions.RequestException as error:
+                    with st.container(
+                        border=True
+                    ):
 
-        show_request_error(
-            error
-        )
+                        cover_col, info_col = (
+                            st.columns(
+                                [1, 3.5],
+                                vertical_alignment="center"
+                            )
+                        )
+
+
+                        # -------------------------
+                        # Cover
+                        # -------------------------
+
+                        with cover_col:
+
+                            if cover_id:
+
+                                cover_url = (
+                                    "https://covers.openlibrary.org/"
+                                    f"b/id/{cover_id}-M.jpg"
+                                )
+
+                                st.image(
+                                    cover_url,
+                                    width=120
+                                )
+
+                            else:
+
+                                st.info(
+                                    "No cover"
+                                )
+
+
+                        # -------------------------
+                        # Book information
+                        # -------------------------
+
+                        with info_col:
+
+                            st.markdown(
+                                f"### {title}"
+                            )
+
+                            st.write(
+                                f"**Author(s):** "
+                                f"{authors_text}"
+                            )
+
+
+                            metadata_col1, (
+                                metadata_col2
+                            ) = st.columns(2)
+
+
+                            with metadata_col1:
+
+                                st.metric(
+                                    "First published",
+                                    year,
+                                    border=True
+                                )
+
+
+                            with metadata_col2:
+
+                                st.metric(
+                                    "Editions",
+                                    edition_count,
+                                    border=True
+                                )
+
+
+                            details_col, (
+                                save_col
+                            ) = st.columns(2)
+
+
+                            # -------------------------
+                            # View Details
+                            # -------------------------
+
+                            with details_col:
+
+                                if st.button(
+                                    "View Details",
+                                    key=(
+                                        f"details_"
+                                        f"{st.session_state.page}_"
+                                        f"{index}"
+                                    ),
+                                    type="primary",
+                                    use_container_width=True
+                                ):
+
+                                    st.session_state.selected_book = (
+                                        book
+                                    )
+
+                                    st.session_state.view = (
+                                        "details"
+                                    )
+
+                                    st.session_state.details_return_view = (
+                                        "search"
+                                    )
+
+                                    st.session_state.load_editions = False
+
+                                    st.session_state.scroll_to_details = True
+
+                                    st.rerun()
+
+
+                            # -------------------------
+                            # Save / Remove
+                            # -------------------------
+
+                            with save_col:
+
+                                if is_book_saved(
+                                    book
+                                ):
+
+                                    if st.button(
+                                        "♥ Saved — Remove",
+                                        key=(
+                                            f"remove_result_"
+                                            f"{st.session_state.page}_"
+                                            f"{index}"
+                                        ),
+                                        use_container_width=True
+                                    ):
+
+                                        remove_saved_book(
+                                            book
+                                        )
+
+                                        st.rerun()
+
+                                else:
+
+                                    if st.button(
+                                        "♡ Save Book",
+                                        key=(
+                                            f"save_result_"
+                                            f"{st.session_state.page}_"
+                                            f"{index}"
+                                        ),
+                                        use_container_width=True
+                                    ):
+
+                                        save_book(
+                                            book
+                                        )
+
+                                        st.rerun()
+
+
+                    st.write("")
+
+
+                # -------------------------
+                # Pagination
+                # -------------------------
+
+                previous_col, next_col = st.columns(
+                    2
+                )
+
+
+                with previous_col:
+
+                    if st.button(
+                        "← Previous",
+                        disabled=(
+                            st.session_state.page <= 1
+                        )
+                    ):
+
+                        st.session_state.page -= 1
+
+                        st.session_state.scroll_to_results = True
+
+                        st.rerun()
+
+
+                with next_col:
+
+                    if st.button(
+                        "Next →",
+                        disabled=(
+                            st.session_state.page
+                            >= total_pages
+                        )
+                    ):
+
+                        st.session_state.page += 1
+
+                        st.session_state.scroll_to_results = True
+
+                        st.rerun()
+
+
+        except requests.exceptions.RequestException as error:
+
+            show_request_error(
+                error
+            )
