@@ -6,6 +6,39 @@ RESULTS_PER_PAGE = 10
 EDITIONS_TO_SHOW = 5
 
 
+LANGUAGE_NAMES = {
+    "eng": "English",
+    "spa": "Spanish",
+    "fre": "French",
+    "fra": "French",
+    "ger": "German",
+    "deu": "German",
+    "ita": "Italian",
+    "por": "Portuguese",
+    "rus": "Russian",
+    "jpn": "Japanese",
+    "chi": "Chinese",
+    "zho": "Chinese",
+    "kor": "Korean",
+    "ara": "Arabic",
+    "dut": "Dutch",
+    "nld": "Dutch",
+    "pol": "Polish",
+    "swe": "Swedish",
+    "nor": "Norwegian",
+    "dan": "Danish",
+    "fin": "Finnish",
+    "cze": "Czech",
+    "ces": "Czech",
+    "hun": "Hungarian",
+    "tur": "Turkish",
+    "heb": "Hebrew",
+    "gre": "Greek",
+    "ell": "Greek",
+    "lat": "Latin",
+}
+
+
 # -------------------------
 # API functions
 # -------------------------
@@ -26,7 +59,6 @@ def searchbooks(query, search_by, page):
             "page": page,
         }
 
-    # Ask Open Library for the fields our app needs
     params["fields"] = (
         "key,title,author_name,first_publish_year,"
         "cover_i,edition_count,has_fulltext,"
@@ -45,12 +77,6 @@ def searchbooks(query, search_by, page):
 
 
 def get_work_details(work_key):
-    # Open Library may return:
-    # OL123W
-    # or:
-    # /works/OL123W
-    #
-    # This gives us only OL123W
     work_id = work_key.rstrip("/").split("/")[-1]
 
     url = f"https://openlibrary.org/works/{work_id}.json"
@@ -91,14 +117,12 @@ def get_work_editions(work_key, limit=EDITIONS_TO_SHOW):
 def get_description(work_data):
     description = work_data.get("description")
 
-    # Some descriptions are dictionaries
     if isinstance(description, dict):
         return description.get(
             "value",
             "No description available."
         )
 
-    # Some are normal strings
     if isinstance(description, str):
         return description
 
@@ -132,7 +156,7 @@ def get_edition_language(edition):
         []
     )
 
-    language_codes = []
+    language_names = []
 
     for language in languages:
         if isinstance(language, dict):
@@ -145,15 +169,20 @@ def get_edition_language(edition):
                 language_code = (
                     language_key
                     .split("/")[-1]
-                    .upper()
+                    .lower()
                 )
 
-                language_codes.append(
-                    language_code
+                language_name = LANGUAGE_NAMES.get(
+                    language_code,
+                    language_code.upper()
                 )
 
-    if language_codes:
-        return ", ".join(language_codes)
+                language_names.append(
+                    language_name
+                )
+
+    if language_names:
+        return ", ".join(language_names)
 
     return "Unknown"
 
@@ -211,6 +240,7 @@ if (
 
     book = st.session_state.selected_book
 
+
     # -------------------------
     # Scroll to top of details
     # -------------------------
@@ -260,6 +290,7 @@ if (
 
 
     try:
+
         # -------------------------
         # Work details
         # -------------------------
@@ -313,7 +344,7 @@ if (
 
 
         # -------------------------
-        # Editions
+        # Editions data
         # -------------------------
 
         editions = []
@@ -343,7 +374,9 @@ if (
         )
 
         with col1:
+
             if cover_id:
+
                 cover_url = (
                     "https://covers.openlibrary.org/"
                     f"b/id/{cover_id}-L.jpg"
@@ -359,8 +392,12 @@ if (
                     "No cover available"
                 )
 
+
         with col2:
-            st.title(title)
+
+            st.title(
+                title
+            )
 
             st.write(
                 f"**Author:** {author}"
@@ -382,7 +419,9 @@ if (
         # Description
         # -------------------------
 
-        st.subheader("Description")
+        st.subheader(
+            "Description"
+        )
 
         st.write(
             description
@@ -393,9 +432,12 @@ if (
         # Subjects
         # -------------------------
 
-        st.subheader("Subjects")
+        st.subheader(
+            "Subjects"
+        )
 
         if subjects:
+
             st.write(
                 ", ".join(
                     subjects[:12]
@@ -403,6 +445,7 @@ if (
             )
 
         else:
+
             st.write(
                 "No subjects available."
             )
@@ -412,17 +455,21 @@ if (
         # Availability
         # -------------------------
 
-        st.subheader("Availability")
+        st.subheader(
+            "Availability"
+        )
 
         if (
             availability_text
             == "No digital availability found."
         ):
+
             st.info(
                 availability_text
             )
 
         else:
+
             st.success(
                 availability_text
             )
@@ -432,19 +479,24 @@ if (
         # Editions
         # -------------------------
 
-        st.subheader("Editions")
+        st.subheader(
+            "Editions"
+        )
 
         if editions_error:
+
             st.warning(
                 "Edition information could not be loaded."
             )
 
         elif not editions:
+
             st.info(
                 "No edition information available."
             )
 
         else:
+
             for edition_number, edition in enumerate(
                 editions,
                 start=1
@@ -491,64 +543,82 @@ if (
                     edition
                 )
 
-                st.markdown(
-                    f"### Edition {edition_number}"
-                )
 
-                st.write(
-                    f"**Title:** {edition_title}"
-                )
+                # -------------------------
+                # Compact edition header
+                # -------------------------
 
-                st.write(
-                    f"**Published:** {publish_date}"
-                )
-
-                st.write(
-                    f"**Publisher:** {publisher}"
-                )
-
-                st.write(
-                    f"**Format:** {physical_format}"
-                )
-
-                st.write(
-                    f"**Pages:** {pages}"
-                )
-
-                st.write(
-                    f"**Language:** {language}"
-                )
-
-                st.write(
-                    f"**ISBN:** {isbn}"
+                edition_label = (
+                    f"Edition {edition_number} "
+                    f"— {physical_format} "
+                    f"— {publish_date}"
                 )
 
 
                 # -------------------------
-                # Edition link
+                # Expandable edition
                 # -------------------------
 
-                edition_key = edition.get(
-                    "key"
-                )
+                with st.expander(
+                    edition_label,
+                    expanded=False
+                ):
 
-                if edition_key:
-                    edition_url = (
-                        "https://openlibrary.org"
-                        f"{edition_key}"
+                    st.write(
+                        f"**Title:** {edition_title}"
                     )
 
-                    st.link_button(
-                        "Open this edition",
-                        edition_url
+                    st.write(
+                        f"**Published:** {publish_date}"
                     )
 
-                st.divider()
+                    st.write(
+                        f"**Publisher:** {publisher}"
+                    )
+
+                    st.write(
+                        f"**Format:** {physical_format}"
+                    )
+
+                    st.write(
+                        f"**Pages:** {pages}"
+                    )
+
+                    st.write(
+                        f"**Language:** {language}"
+                    )
+
+                    st.write(
+                        f"**ISBN:** {isbn}"
+                    )
+
+
+                    # -------------------------
+                    # Edition link
+                    # -------------------------
+
+                    edition_key = edition.get(
+                        "key"
+                    )
+
+                    if edition_key:
+
+                        edition_url = (
+                            "https://openlibrary.org"
+                            f"{edition_key}"
+                        )
+
+                        st.link_button(
+                            "Open this edition",
+                            edition_url
+                        )
 
 
         # -------------------------
         # Open Library work link
         # -------------------------
+
+        st.divider()
 
         work_id = (
             work_key
@@ -575,7 +645,6 @@ if (
         )
 
 
-    # Prevent the search page from appearing below details
     st.stop()
 
 
@@ -609,11 +678,13 @@ if st.button("Search"):
     clean_query = query.strip()
 
     if not clean_query:
+
         st.warning(
             "Please enter something to search."
         )
 
     else:
+
         st.session_state.query = (
             clean_query
         )
@@ -636,6 +707,7 @@ if st.button("Search"):
 if st.session_state.searched:
 
     try:
+
         data = searchbooks(
             st.session_state.query,
             st.session_state.search_by,
@@ -774,6 +846,7 @@ if st.session_state.searched:
                         )
 
                     else:
+
                         st.write(
                             "No cover"
                         )
