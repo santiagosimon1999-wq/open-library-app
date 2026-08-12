@@ -1026,30 +1026,51 @@ st.title(
 )
 
 
-search_by = st.selectbox(
-    "Search by",
-    [
+# -------------------------
+# Search form
+# -------------------------
+
+with st.form(
+    "search_form"
+):
+
+    search_options = [
         "Title",
         "Author"
     ]
-)
 
-
-query = st.text_input(
-    "Search",
-    placeholder=(
-        "Enter a book title or author"
+    current_search_index = (
+        search_options.index(
+            st.session_state.search_by
+        )
     )
-)
+
+    search_by = st.selectbox(
+        "Search by",
+        search_options,
+        index=current_search_index,
+    )
+
+    query = st.text_input(
+        "Search",
+        value=st.session_state.query,
+        placeholder=(
+            "Enter a book title or author"
+        ),
+    )
+
+    search_submitted = (
+        st.form_submit_button(
+            "Search"
+        )
+    )
 
 
 # -------------------------
-# Search button
+# Process search
 # -------------------------
 
-if st.button(
-    "Search"
-):
+if search_submitted:
 
     clean_query = query.strip()
 
@@ -1119,6 +1140,21 @@ if st.session_state.searched:
                 - 1
             )
             // RESULTS_PER_PAGE
+        )
+
+
+        # -------------------------
+        # Results heading
+        # -------------------------
+
+        st.subheader(
+            f'Results for '
+            f'"{st.session_state.query}"'
+        )
+
+        st.caption(
+            f"Searching by "
+            f"{st.session_state.search_by}"
         )
 
 
