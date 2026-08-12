@@ -148,9 +148,16 @@ def searchbooks(
             "page": page,
         }
 
-    else:
+    elif search_by == "Author":
         params = {
             "author": query,
+            "limit": RESULTS_PER_PAGE,
+            "page": page,
+        }
+
+    else:
+        params = {
+            "q": f"isbn:{query}",
             "limit": RESULTS_PER_PAGE,
             "page": page,
         }
@@ -238,6 +245,31 @@ def get_description(work_data):
     return "No description available."
 
 
+def normalize_isbn(isbn):
+    return (
+        isbn
+        .replace("-", "")
+        .replace(" ", "")
+        .upper()
+    )
+
+
+def is_valid_isbn_format(isbn):
+    if len(isbn) == 13:
+        return isbn.isdigit()
+
+    if len(isbn) == 10:
+        return (
+            isbn[:9].isdigit()
+            and (
+                isbn[-1].isdigit()
+                or isbn[-1] == "X"
+            )
+        )
+
+    return False
+
+
 def get_availability_details(book):
     availability = book.get(
         "availability"
@@ -312,6 +344,58 @@ def yes_or_no(value):
         return "Yes"
 
     return "No"
+
+
+def get_subject_badges(subjects):
+    badges = []
+
+    for subject in subjects[:12]:
+        safe_subject = (
+            str(subject)
+            .replace("[", "(")
+            .replace("]", ")")
+        )
+
+        badges.append(
+            f":blue-badge[{safe_subject}]"
+        )
+
+    return " ".join(
+        badges
+    )
+
+
+def get_authors_text(
+    book,
+    max_authors=3
+):
+    authors = book.get(
+        "author_name",
+        []
+    )
+
+    if not authors:
+        return "Unknown"
+
+    visible_authors = authors[
+        :max_authors
+    ]
+
+    authors_text = ", ".join(
+        visible_authors
+    )
+
+    remaining_authors = (
+        len(authors)
+        - len(visible_authors)
+    )
+
+    if remaining_authors > 0:
+        authors_text += (
+            f" + {remaining_authors} more"
+        )
+
+    return authors_text
 
 
 def get_edition_language(edition):
@@ -402,7 +486,6 @@ def show_request_error(error):
             "contacting Open Library."
         )
 
-    # Keep this while we are developing.
     st.caption(
         f"Technical error: {error}"
     )
@@ -435,6 +518,9 @@ if "selected_book" not in st.session_state:
 
 if "scroll_to_details" not in st.session_state:
     st.session_state.scroll_to_details = False
+
+if "load_editions" not in st.session_state:
+    st.session_state.load_editions = False
 
 
 # =========================================================
@@ -489,6 +575,8 @@ if (
         st.session_state.view = "search"
 
         st.session_state.selected_book = None
+
+        st.session_state.load_editions = False
 
         st.session_state.scroll_to_results = True
 
@@ -570,423 +658,510 @@ if (
         )
 
 
-        # -------------------------
-        # Editions data
-        # -------------------------
+        # =================================================
+        # BOOK OVERVIEW
+        # =================================================
 
-        editions = []
+        with st.container(
+            border=True
+        ):
 
-        editions_error = None
-
-        try:
-
-            with st.spinner(
-                "Loading editions..."
-            ):
-
-                editions_data = (
-                    get_work_editions(
-                        work_key
-                    )
-                )
-
-            editions = editions_data.get(
-                "entries",
-                []
+            col1, col2 = st.columns(
+                [1, 2.4],
+                vertical_alignment="center"
             )
 
-        except requests.exceptions.RequestException as error:
 
-            editions_error = error
+            with col1:
+
+                if cover_id:
+
+                    cover_url = (
+                        "https://covers.openlibrary.org/"
+                        f"b/id/{cover_id}-L.jpg"
+                    )
+
+                    st.image(
+                        cover_url,
+                        width=220
+                    )
+
+                else:
+
+                    st.info(
+                        "No cover available"
+                    )
 
 
-        # -------------------------
-        # Main book information
-        # -------------------------
+            with col2:
 
-        col1, col2 = st.columns(
-            [1, 2],
-            vertical_alignment="center"
-        )
-
-
-        with col1:
-
-            if cover_id:
-
-                cover_url = (
-                    "https://covers.openlibrary.org/"
-                    f"b/id/{cover_id}-L.jpg"
+                st.caption(
+                    "BOOK DETAILS"
                 )
 
-                st.image(
-                    cover_url,
-                    width=220
+                st.title(
+                    title
                 )
-
-            else:
 
                 st.write(
-                    "No cover available"
+                    f"**Author:** {author}"
+                )
+
+                st.write("")
+
+                year_col, editions_col = (
+                    st.columns(2)
                 )
 
 
-        with col2:
+                with year_col:
 
-            st.title(
-                title
-            )
-
-            st.write(
-                f"**Author:** {author}"
-            )
-
-            st.write(
-                f"**First Published:** {year}"
-            )
-
-            st.write(
-                f"**Editions:** {edition_count}"
-            )
+                    st.metric(
+                        "First published",
+                        year,
+                        border=True
+                    )
 
 
-        st.divider()
+                with editions_col:
+
+                    st.metric(
+                        "Editions",
+                        edition_count,
+                        border=True
+                    )
 
 
-        # -------------------------
-        # Description
-        # -------------------------
+        st.write("")
+
+
+        # =================================================
+        # DESCRIPTION
+        # =================================================
 
         st.subheader(
             "Description"
         )
 
-        st.write(
-            description
-        )
+        with st.container(
+            border=True
+        ):
+
+            st.write(
+                description
+            )
 
 
-        # -------------------------
-        # Subjects
-        # -------------------------
+        st.write("")
+
+
+        # =================================================
+        # SUBJECTS
+        # =================================================
 
         st.subheader(
             "Subjects"
         )
 
+
         if subjects:
 
-            st.write(
-                ", ".join(
-                    subjects[:12]
+            subject_badges = (
+                get_subject_badges(
+                    subjects
                 )
+            )
+
+            st.markdown(
+                subject_badges
             )
 
         else:
 
-            st.write(
+            st.info(
                 "No subjects available."
             )
 
 
-        # -------------------------
-        # Availability
-        # -------------------------
+        st.write("")
+
+
+        # =================================================
+        # AVAILABILITY
+        # =================================================
 
         st.subheader(
             "Availability"
         )
 
 
-        if not availability_details:
+        with st.container(
+            border=True
+        ):
 
-            if (
-                book.get("public_scan_b")
-                or book.get("has_fulltext")
-            ):
+            if not availability_details:
 
-                st.info(
-                    "Digital content exists, "
-                    "but detailed availability "
-                    "was not returned."
-                )
+                if (
+                    book.get("public_scan_b")
+                    or book.get("has_fulltext")
+                ):
+
+                    st.info(
+                        "Digital content exists, "
+                        "but detailed availability "
+                        "was not returned."
+                    )
+
+                else:
+
+                    st.info(
+                        "No digital availability "
+                        "information found."
+                    )
+
 
             else:
 
-                st.info(
-                    "No digital availability "
-                    "information found."
+                availability_status = (
+                    availability_details[
+                        "status"
+                    ]
                 )
 
 
-        else:
+                if availability_status in [
+                    "Open access",
+                    "Borrow available",
+                ]:
 
-            st.write(
-                "**Status:** "
-                f"{availability_details['status']}"
-            )
-
-
-            (
-                read_col,
-                preview_col,
-                borrow_col,
-                browse_col,
-            ) = st.columns(4)
-
-
-            with read_col:
-
-                st.write(
-                    "**Read online**"
-                )
-
-                st.write(
-                    yes_or_no(
-                        availability_details[
-                            "readable"
-                        ]
+                    st.success(
+                        f"Status: "
+                        f"{availability_status}"
                     )
-                )
 
+                else:
 
-            with preview_col:
-
-                st.write(
-                    "**Preview**"
-                )
-
-                st.write(
-                    yes_or_no(
-                        availability_details[
-                            "previewable"
-                        ]
+                    st.info(
+                        f"Status: "
+                        f"{availability_status}"
                     )
-                )
 
 
-            with borrow_col:
+                (
+                    read_col,
+                    preview_col,
+                    borrow_col,
+                    browse_col,
+                ) = st.columns(4)
 
-                st.write(
-                    "**Borrowing**"
-                )
 
-                st.write(
-                    yes_or_no(
-                        availability_details[
-                            "lendable"
-                        ]
+                with read_col:
+
+                    st.metric(
+                        "Read online",
+                        yes_or_no(
+                            availability_details[
+                                "readable"
+                            ]
+                        ),
+                        border=True
                     )
-                )
 
 
-            with browse_col:
+                with preview_col:
 
-                st.write(
-                    "**Browse**"
-                )
-
-                st.write(
-                    yes_or_no(
-                        availability_details[
-                            "browseable"
-                        ]
+                    st.metric(
+                        "Preview",
+                        yes_or_no(
+                            availability_details[
+                                "previewable"
+                            ]
+                        ),
+                        border=True
                     )
+
+
+                with borrow_col:
+
+                    st.metric(
+                        "Borrowing",
+                        yes_or_no(
+                            availability_details[
+                                "lendable"
+                            ]
+                        ),
+                        border=True
+                    )
+
+
+                with browse_col:
+
+                    st.metric(
+                        "Browse",
+                        yes_or_no(
+                            availability_details[
+                                "browseable"
+                            ]
+                        ),
+                        border=True
+                    )
+
+
+                if availability_details["waitlist"]:
+
+                    st.caption(
+                        "Waitlist available"
+                    )
+
+
+                availability_edition = (
+                    availability_details[
+                        "edition_id"
+                    ]
                 )
 
 
-            if availability_details["waitlist"]:
+                if availability_edition:
 
-                st.write(
-                    "**Waitlist:** Available"
-                )
+                    availability_edition_id = (
+                        availability_edition
+                        .rstrip("/")
+                        .split("/")[-1]
+                    )
 
+                    availability_url = (
+                        "https://openlibrary.org/"
+                        f"books/"
+                        f"{availability_edition_id}"
+                    )
 
-            availability_edition = (
-                availability_details[
-                    "edition_id"
-                ]
-            )
-
-
-            if availability_edition:
-
-                availability_edition_id = (
-                    availability_edition
-                    .rstrip("/")
-                    .split("/")[-1]
-                )
-
-                availability_url = (
-                    "https://openlibrary.org/"
-                    f"books/"
-                    f"{availability_edition_id}"
-                )
-
-                st.link_button(
-                    "Open available edition",
-                    availability_url
-                )
+                    st.link_button(
+                        "Open available edition",
+                        availability_url
+                    )
 
 
-        # -------------------------
-        # Editions
-        # -------------------------
+        st.write("")
+
+
+        # =================================================
+        # EDITIONS
+        # =================================================
 
         st.subheader(
             "Editions"
         )
 
 
-        if editions_error:
+        if not st.session_state.load_editions:
 
-            st.warning(
-                "Edition information "
-                "could not be loaded."
-            )
+            with st.container(
+                border=True
+            ):
 
-            st.caption(
-                f"Technical error: "
-                f"{editions_error}"
-            )
+                st.write(
+                    "**Want more publication details?**"
+                )
 
+                st.caption(
+                    "Edition information is loaded "
+                    "separately to keep this page fast."
+                )
 
-        elif not editions:
+                if st.button(
+                    "Load editions",
+                    type="primary"
+                ):
 
-            st.info(
-                "No edition information available."
-            )
+                    st.session_state.load_editions = True
+
+                    st.rerun()
 
 
         else:
 
-            for edition_number, edition in enumerate(
-                editions,
-                start=1
-            ):
+            editions = []
 
-                edition_title = edition.get(
-                    "title",
-                    title
-                )
+            editions_error = None
 
-                publish_date = edition.get(
-                    "publish_date",
-                    "Unknown"
-                )
+            try:
 
-                publishers = edition.get(
-                    "publishers",
+                with st.spinner(
+                    "Loading editions..."
+                ):
+
+                    editions_data = (
+                        get_work_editions(
+                            work_key
+                        )
+                    )
+
+                editions = editions_data.get(
+                    "entries",
                     []
                 )
 
-                publisher = (
-                    ", ".join(
-                        publishers[:2]
-                    )
-                    if publishers
-                    else "Unknown"
+            except requests.exceptions.RequestException as error:
+
+                editions_error = error
+
+
+            if editions_error:
+
+                st.warning(
+                    "Edition information "
+                    "could not be loaded."
                 )
 
-                pages = edition.get(
-                    "number_of_pages",
-                    "Unknown"
-                )
-
-                physical_format = edition.get(
-                    "physical_format",
-                    "Unknown"
-                )
-
-                language = (
-                    get_edition_language(
-                        edition
-                    )
-                )
-
-                isbn = get_edition_isbn(
-                    edition
+                st.caption(
+                    f"Technical error: "
+                    f"{editions_error}"
                 )
 
 
-                # -------------------------
-                # Compact edition header
-                # -------------------------
+            elif not editions:
 
-                edition_label = (
-                    f"Edition {edition_number} "
-                    f"— {physical_format} "
-                    f"— {publish_date}"
+                st.info(
+                    "No edition information available."
                 )
 
 
-                # -------------------------
-                # Expandable edition
-                # -------------------------
+            else:
 
-                with st.expander(
-                    edition_label,
-                    expanded=False
+                st.caption(
+                    f"Showing up to "
+                    f"{EDITIONS_TO_SHOW} editions."
+                )
+
+
+                for edition_number, edition in enumerate(
+                    editions,
+                    start=1
                 ):
 
-                    st.write(
-                        f"**Title:** {edition_title}"
+                    edition_title = edition.get(
+                        "title",
+                        title
                     )
 
-                    st.write(
-                        f"**Published:** "
-                        f"{publish_date}"
+                    publish_date = edition.get(
+                        "publish_date",
+                        "Unknown"
                     )
 
-                    st.write(
-                        f"**Publisher:** "
-                        f"{publisher}"
+                    publishers = edition.get(
+                        "publishers",
+                        []
                     )
 
-                    st.write(
-                        f"**Format:** "
-                        f"{physical_format}"
+                    publisher = (
+                        ", ".join(
+                            publishers[:2]
+                        )
+                        if publishers
+                        else "Unknown"
                     )
 
-                    st.write(
-                        f"**Pages:** {pages}"
+                    pages = edition.get(
+                        "number_of_pages",
+                        "Unknown"
                     )
 
-                    st.write(
-                        f"**Language:** "
-                        f"{language}"
+                    physical_format = edition.get(
+                        "physical_format",
+                        "Unknown"
                     )
 
-                    st.write(
-                        f"**ISBN:** {isbn}"
+                    language = (
+                        get_edition_language(
+                            edition
+                        )
                     )
 
-
-                    # -------------------------
-                    # Edition link
-                    # -------------------------
-
-                    edition_key = edition.get(
-                        "key"
+                    isbn = get_edition_isbn(
+                        edition
                     )
 
 
-                    if edition_key:
+                    edition_label = (
+                        f"Edition {edition_number} "
+                        f"— {physical_format} "
+                        f"— {publish_date}"
+                    )
 
-                        edition_url = (
-                            "https://openlibrary.org"
-                            f"{edition_key}"
+
+                    with st.expander(
+                        edition_label,
+                        expanded=False
+                    ):
+
+                        edition_info_col1, (
+                            edition_info_col2
+                        ) = st.columns(2)
+
+
+                        with edition_info_col1:
+
+                            st.write(
+                                f"**Title:** "
+                                f"{edition_title}"
+                            )
+
+                            st.write(
+                                f"**Publisher:** "
+                                f"{publisher}"
+                            )
+
+                            st.write(
+                                f"**Published:** "
+                                f"{publish_date}"
+                            )
+
+                            st.write(
+                                f"**Format:** "
+                                f"{physical_format}"
+                            )
+
+
+                        with edition_info_col2:
+
+                            st.write(
+                                f"**Pages:** "
+                                f"{pages}"
+                            )
+
+                            st.write(
+                                f"**Language:** "
+                                f"{language}"
+                            )
+
+                            st.write(
+                                f"**ISBN:** "
+                                f"{isbn}"
+                            )
+
+
+                        edition_key = edition.get(
+                            "key"
                         )
 
-                        st.link_button(
-                            "Open this edition",
-                            edition_url
-                        )
+
+                        if edition_key:
+
+                            edition_url = (
+                                "https://openlibrary.org"
+                                f"{edition_key}"
+                            )
+
+                            st.link_button(
+                                "Open this edition",
+                                edition_url
+                            )
 
 
-        # -------------------------
-        # Open Library work link
-        # -------------------------
+        # =================================================
+        # OPEN LIBRARY LINK
+        # =================================================
 
         st.divider()
 
@@ -1001,8 +1176,12 @@ if (
             f"works/{work_id}"
         )
 
+        st.caption(
+            "Source"
+        )
+
         st.link_button(
-            "Open in Open Library",
+            "Open book on Open Library",
             open_library_url
         )
 
@@ -1036,7 +1215,8 @@ with st.form(
 
     search_options = [
         "Title",
-        "Author"
+        "Author",
+        "ISBN",
     ]
 
     current_search_index = (
@@ -1055,7 +1235,8 @@ with st.form(
         "Search",
         value=st.session_state.query,
         placeholder=(
-            "Enter a book title or author"
+            "Enter a book title, "
+            "author, or ISBN"
         ),
     )
 
@@ -1085,19 +1266,50 @@ if search_submitted:
 
     else:
 
-        st.session_state.query = (
-            clean_query
-        )
+        search_is_valid = True
 
-        st.session_state.search_by = (
-            search_by
-        )
 
-        st.session_state.page = 1
+        # -------------------------
+        # ISBN cleanup / validation
+        # -------------------------
 
-        st.session_state.searched = True
+        if search_by == "ISBN":
 
-        st.session_state.scroll_to_results = True
+            clean_query = normalize_isbn(
+                clean_query
+            )
+
+            if not is_valid_isbn_format(
+                clean_query
+            ):
+
+                st.warning(
+                    "Please enter a valid "
+                    "ISBN-10 or ISBN-13."
+                )
+
+                search_is_valid = False
+
+
+        # -------------------------
+        # Save valid search
+        # -------------------------
+
+        if search_is_valid:
+
+            st.session_state.query = (
+                clean_query
+            )
+
+            st.session_state.search_by = (
+                search_by
+            )
+
+            st.session_state.page = 1
+
+            st.session_state.searched = True
+
+            st.session_state.scroll_to_results = True
 
 
 # -------------------------
@@ -1212,9 +1424,9 @@ if st.session_state.searched:
             )
 
 
-            # -------------------------
-            # Display books
-            # -------------------------
+            # =================================================
+            # DISPLAY BOOK CARDS
+            # =================================================
 
             for index, book in enumerate(
                 books
@@ -1225,19 +1437,19 @@ if st.session_state.searched:
                     "Unknown"
                 )
 
-                authors = book.get(
-                    "author_name",
-                    []
-                )
-
-                author = (
-                    authors[0]
-                    if authors
-                    else "Unknown"
+                authors_text = (
+                    get_authors_text(
+                        book
+                    )
                 )
 
                 year = book.get(
                     "first_publish_year",
+                    "Unknown"
+                )
+
+                edition_count = book.get(
+                    "edition_count",
                     "Unknown"
                 )
 
@@ -1246,68 +1458,103 @@ if st.session_state.searched:
                 )
 
 
-                col1, col2 = st.columns(
-                    [1, 3],
-                    vertical_alignment="center"
-                )
+                with st.container(
+                    border=True
+                ):
 
-
-                with col1:
-
-                    if cover_id:
-
-                        cover_url = (
-                            "https://covers.openlibrary.org/"
-                            f"b/id/{cover_id}-M.jpg"
+                    cover_col, info_col = (
+                        st.columns(
+                            [1, 3.5],
+                            vertical_alignment="center"
                         )
+                    )
 
-                        st.image(
-                            cover_url,
-                            width=120
+
+                    # -------------------------
+                    # Cover
+                    # -------------------------
+
+                    with cover_col:
+
+                        if cover_id:
+
+                            cover_url = (
+                                "https://covers.openlibrary.org/"
+                                f"b/id/{cover_id}-M.jpg"
+                            )
+
+                            st.image(
+                                cover_url,
+                                width=120
+                            )
+
+                        else:
+
+                            st.info(
+                                "No cover"
+                            )
+
+
+                    # -------------------------
+                    # Book information
+                    # -------------------------
+
+                    with info_col:
+
+                        st.markdown(
+                            f"### {title}"
                         )
-
-                    else:
 
                         st.write(
-                            "No cover"
+                            f"**Author(s):** "
+                            f"{authors_text}"
                         )
 
-
-                with col2:
-
-                    st.write(
-                        f"**Title:** {title}"
-                    )
-
-                    st.write(
-                        f"**Author:** {author}"
-                    )
-
-                    st.write(
-                        f"**First Published:** {year}"
-                    )
+                        metadata_col1, (
+                            metadata_col2
+                        ) = st.columns(2)
 
 
-                    # -------------------------
-                    # View Details
-                    # -------------------------
+                        with metadata_col1:
 
-                    if st.button(
-                        "View Details",
-                        key=(
-                            f"details_"
-                            f"{st.session_state.page}_"
-                            f"{index}"
-                        )
-                    ):
+                            st.metric(
+                                "First published",
+                                year,
+                                border=True
+                            )
 
-                        st.session_state.selected_book = book
 
-                        st.session_state.view = "details"
+                        with metadata_col2:
 
-                        st.session_state.scroll_to_details = True
+                            st.metric(
+                                "Editions",
+                                edition_count,
+                                border=True
+                            )
 
-                        st.rerun()
+
+                        if st.button(
+                            "View Details",
+                            key=(
+                                f"details_"
+                                f"{st.session_state.page}_"
+                                f"{index}"
+                            ),
+                            type="primary"
+                        ):
+
+                            st.session_state.selected_book = book
+
+                            st.session_state.view = "details"
+
+                            st.session_state.load_editions = False
+
+                            st.session_state.scroll_to_details = True
+
+                            st.rerun()
+
+
+                st.write("")
 
 
             # -------------------------
