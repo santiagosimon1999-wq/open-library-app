@@ -93,6 +93,109 @@ def sync_saved_books():
     )
 
 
+def set_flash(message, icon="✅"):
+    st.session_state.flash_message = {
+        "message": message,
+        "icon": icon,
+    }
+
+
+def show_flash():
+    flash = st.session_state.get(
+        "flash_message"
+    )
+
+    if not flash:
+        return
+
+    st.toast(
+        flash["message"],
+        icon=flash["icon"],
+    )
+
+    st.session_state.flash_message = None
+
+
+def friendly_auth_error(error, action):
+    error_code = str(
+        getattr(error, "code", "")
+    ).lower()
+
+    error_text = str(error).lower()
+    combined_error = (
+        f"{error_code} {error_text}"
+    )
+
+    if (
+        "invalid_credentials" in combined_error
+        or "invalid login credentials" in combined_error
+    ):
+        return (
+            "The email or password is incorrect."
+        )
+
+    if "email_not_confirmed" in combined_error:
+        return (
+            "Please confirm your email before logging in."
+        )
+
+    if (
+        "user_already_exists" in combined_error
+        or "user already registered" in combined_error
+    ):
+        return (
+            "An account already exists for this email. "
+            "Try logging in instead."
+        )
+
+    if "weak_password" in combined_error:
+        return (
+            "That password does not meet the current "
+            "password requirements."
+        )
+
+    if (
+        "over_email_send_rate_limit" in combined_error
+        or "rate limit" in combined_error
+    ):
+        return (
+            "Too many attempts were made recently. "
+            "Please wait a little and try again."
+        )
+
+    if "signup_disabled" in combined_error:
+        return (
+            "New account registration is currently unavailable."
+        )
+
+    if action == "login":
+        return (
+            "We could not sign you in. "
+            "Please check your information and try again."
+        )
+
+    return (
+        "We could not create the account. "
+        "Please check your information and try again."
+    )
+
+
+def show_saved_book_error(action):
+    if action == "save":
+        st.error(
+            "This book could not be saved right now."
+        )
+    else:
+        st.error(
+            "This book could not be removed right now."
+        )
+
+    st.caption(
+        "Your Saved Books were not changed. "
+        "Please try again."
+    )
+
+
 # =========================================================
 # SESSION STATE
 # =========================================================
@@ -141,8 +244,15 @@ if "auth_return_view" not in st.session_state:
         "search"
     )
 
+if "flash_message" not in st.session_state:
+    st.session_state.flash_message = None
+
+if "registration_pending_email" not in st.session_state:
+    st.session_state.registration_pending_email = None
+
 
 current_user = get_current_user()
+show_flash()
 
 
 # =========================================================
@@ -179,29 +289,48 @@ with st.sidebar:
 
         st.divider()
 
-        st.caption(
-            "Signed in as"
-        )
-        st.write(
-            f"**{current_user['email']}**"
-        )
-
-        if st.button(
-            "Logout",
-            use_container_width=True
+        with st.container(
+            border=True
         ):
-            try:
-                sign_out()
-            except Exception:
-                # Even if the remote logout request has a problem,
-                # clear local app state for this browser session.
-                st.session_state.auth_user = None
+            st.caption(
+                "YOUR ACCOUNT"
+            )
+            st.write(
+                f"**{current_user['email']}**"
+            )
+            st.caption(
+                f"{saved_count} saved book(s)"
+            )
 
-            st.session_state.saved_books = []
-            st.session_state.view = "search"
-            st.session_state.selected_book = None
-            st.session_state.load_editions = False
-            st.rerun()
+            if st.button(
+                "Account",
+                use_container_width=True
+            ):
+                st.session_state.view = "account"
+                st.session_state.selected_book = None
+                st.session_state.load_editions = False
+                st.rerun()
+
+            if st.button(
+                "Logout",
+                use_container_width=True
+            ):
+                try:
+                    sign_out()
+                except Exception:
+                    # Clear local app state even if the remote
+                    # sign-out request has a temporary problem.
+                    st.session_state.auth_user = None
+
+                st.session_state.saved_books = []
+                st.session_state.view = "search"
+                st.session_state.selected_book = None
+                st.session_state.load_editions = False
+                set_flash(
+                    "You have been signed out.",
+                    "👋"
+                )
+                st.rerun()
 
         st.caption(
             "Saved Books are stored in your "
@@ -227,6 +356,7 @@ with st.sidebar:
             "Create Account",
             use_container_width=True
         ):
+            st.session_state.registration_pending_email = None
             return_view = (
                 st.session_state.view
                 if st.session_state.view
@@ -308,11 +438,16 @@ if st.session_state.view == "login":
                     if target_view not in [
                         "search",
                         "details",
+                        "saved",
                     ]:
                         target_view = "search"
 
                     st.session_state.view = (
                         target_view
+                    )
+                    set_flash(
+                        "Welcome back!",
+                        "👋"
                     )
                     st.rerun()
                 else:
@@ -322,10 +457,10 @@ if st.session_state.view == "login":
 
             except Exception as error:
                 st.error(
-                    "Login failed."
-                )
-                st.caption(
-                    str(error)
+                    friendly_auth_error(
+                        error,
+                        "login"
+                    )
                 )
 
     st.write("")
@@ -333,6 +468,7 @@ if st.session_state.view == "login":
     if st.button(
         "Create an account"
     ):
+        st.session_state.registration_pending_email = None
         st.session_state.view = "register"
         st.rerun()
 
@@ -352,9 +488,46 @@ if st.session_state.view == "login":
 
 if st.session_state.view == "register":
     st.title("Create Account")
+
+    pending_email = (
+        st.session_state.registration_pending_email
+    )
+
+    if pending_email:
+        st.success(
+            "Your account was created."
+        )
+        st.info(
+            "Check your email and confirm your account "
+            "before logging in."
+        )
+        st.write(
+            f"Confirmation sent to **{pending_email}**"
+        )
+
+        if st.button(
+            "Go to Login",
+            type="primary"
+        ):
+            st.session_state.registration_pending_email = None
+            st.session_state.view = "login"
+            st.rerun()
+
+        if st.button(
+            "← Back to Search"
+        ):
+            st.session_state.registration_pending_email = None
+            st.session_state.view = "search"
+            st.rerun()
+
+        st.stop()
+
     st.caption(
         "Create an account with email "
         "and password."
+    )
+    st.caption(
+        "Use a strong password you do not reuse elsewhere."
     )
 
     with st.form(
@@ -425,20 +598,24 @@ if st.session_state.view == "register":
                     if target_view not in [
                         "search",
                         "details",
+                        "saved",
                     ]:
                         target_view = "search"
 
                     st.session_state.view = (
                         target_view
                     )
+                    set_flash(
+                        "Account created successfully.",
+                        "🎉"
+                    )
                     st.rerun()
 
                 elif response.user:
-                    st.success(
-                        "Account created. "
-                        "Check your email and confirm "
-                        "your account before logging in."
+                    st.session_state.registration_pending_email = (
+                        clean_email
                     )
+                    st.rerun()
                 else:
                     st.error(
                         "Account could not be created."
@@ -446,10 +623,10 @@ if st.session_state.view == "register":
 
             except Exception as error:
                 st.error(
-                    "Account creation failed."
-                )
-                st.caption(
-                    str(error)
+                    friendly_auth_error(
+                        error,
+                        "register"
+                    )
                 )
 
     st.write("")
@@ -674,13 +851,14 @@ if (
                                     book,
                                 )
                                 sync_saved_books()
-                                st.rerun()
-                            except Exception as error:
-                                st.error(
-                                    "Could not remove this book."
+                                set_flash(
+                                    "Book removed from Saved Books.",
+                                    "🗑️"
                                 )
-                                st.caption(
-                                    str(error)
+                                st.rerun()
+                            except Exception:
+                                show_saved_book_error(
+                                    "remove"
                                 )
                     else:
                         if st.button(
@@ -695,13 +873,14 @@ if (
                                     book,
                                 )
                                 sync_saved_books()
-                                st.rerun()
-                            except Exception as error:
-                                st.error(
-                                    "Could not save this book."
+                                set_flash(
+                                    "Book saved to your account.",
+                                    "📚"
                                 )
-                                st.caption(
-                                    str(error)
+                                st.rerun()
+                            except Exception:
+                                show_saved_book_error(
+                                    "save"
                                 )
                 else:
                     if st.button(
@@ -1109,6 +1288,103 @@ if (
 
 
 # =========================================================
+# ACCOUNT VIEW
+# =========================================================
+
+
+if st.session_state.view == "account":
+    if not current_user:
+        open_login(
+            "search"
+        )
+
+    st.title(
+        "Account"
+    )
+
+    with st.container(
+        border=True
+    ):
+        st.caption(
+            "SIGNED IN AS"
+        )
+        st.subheader(
+            current_user["email"]
+        )
+
+        account_saved_col, account_status_col = (
+            st.columns(2)
+        )
+
+        with account_saved_col:
+            st.metric(
+                "Saved books",
+                len(st.session_state.saved_books),
+                border=True
+            )
+
+        with account_status_col:
+            st.metric(
+                "Account status",
+                "Active",
+                border=True
+            )
+
+        st.caption(
+            "Your Saved Books are linked to this account "
+            "and stored in Supabase."
+        )
+
+    st.write(
+        ""
+    )
+
+    account_saved_button_col, account_search_button_col = (
+        st.columns(2)
+    )
+
+    with account_saved_button_col:
+        if st.button(
+            "View Saved Books",
+            type="primary",
+            use_container_width=True
+        ):
+            st.session_state.view = "saved"
+            st.rerun()
+
+    with account_search_button_col:
+        if st.button(
+            "Back to Search",
+            use_container_width=True
+        ):
+            st.session_state.view = "search"
+            st.rerun()
+
+    st.divider()
+
+    if st.button(
+        "Logout",
+        use_container_width=True
+    ):
+        try:
+            sign_out()
+        except Exception:
+            st.session_state.auth_user = None
+
+        st.session_state.saved_books = []
+        st.session_state.view = "search"
+        st.session_state.selected_book = None
+        st.session_state.load_editions = False
+        set_flash(
+            "You have been signed out.",
+            "👋"
+        )
+        st.rerun()
+
+    st.stop()
+
+
+# =========================================================
 # SAVED BOOKS VIEW
 # =========================================================
 
@@ -1124,7 +1400,7 @@ if st.session_state.view == "saved":
             type="primary"
         ):
             open_login(
-                "search"
+                "saved"
             )
 
         st.stop()
@@ -1280,13 +1556,14 @@ if st.session_state.view == "saved":
                                     book,
                                 )
                                 sync_saved_books()
-                                st.rerun()
-                            except Exception as error:
-                                st.error(
-                                    "Could not remove this book."
+                                set_flash(
+                                    "Book removed from Saved Books.",
+                                    "🗑️"
                                 )
-                                st.caption(
-                                    str(error)
+                                st.rerun()
+                            except Exception:
+                                show_saved_book_error(
+                                    "remove"
                                 )
 
             st.write("")
@@ -1615,13 +1892,14 @@ if st.session_state.view == "search":
                                                 book,
                                             )
                                             sync_saved_books()
-                                            st.rerun()
-                                        except Exception as error:
-                                            st.error(
-                                                "Could not remove this book."
+                                            set_flash(
+                                                "Book removed from Saved Books.",
+                                                "🗑️"
                                             )
-                                            st.caption(
-                                                str(error)
+                                            st.rerun()
+                                        except Exception:
+                                            show_saved_book_error(
+                                                "remove"
                                             )
 
                                 else:
@@ -1640,13 +1918,14 @@ if st.session_state.view == "search":
                                                 book,
                                             )
                                             sync_saved_books()
-                                            st.rerun()
-                                        except Exception as error:
-                                            st.error(
-                                                "Could not save this book."
+                                            set_flash(
+                                                "Book saved to your account.",
+                                                "📚"
                                             )
-                                            st.caption(
-                                                str(error)
+                                            st.rerun()
+                                        except Exception:
+                                            show_saved_book_error(
+                                                "save"
                                             )
 
                     st.write("")
