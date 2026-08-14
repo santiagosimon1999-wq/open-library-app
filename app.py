@@ -8,6 +8,12 @@ from api import (
     get_work_editions,
     searchbooks,
 )
+from database import (
+    get_current_user,
+    sign_in,
+    sign_out,
+    sign_up,
+)
 from helpers import (
     get_authors_text,
     get_availability_details,
@@ -64,6 +70,14 @@ def show_request_error(error):
     )
 
 
+def open_login(return_view="search"):
+    st.session_state.auth_return_view = (
+        return_view
+    )
+    st.session_state.view = "login"
+    st.rerun()
+
+
 # =========================================================
 # SESSION STATE
 # =========================================================
@@ -100,7 +114,20 @@ if "saved_books" not in st.session_state:
     st.session_state.saved_books = []
 
 if "details_return_view" not in st.session_state:
-    st.session_state.details_return_view = "search"
+    st.session_state.details_return_view = (
+        "search"
+    )
+
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
+
+if "auth_return_view" not in st.session_state:
+    st.session_state.auth_return_view = (
+        "search"
+    )
+
+
+current_user = get_current_user()
 
 
 # =========================================================
@@ -121,24 +148,307 @@ with st.sidebar:
         st.session_state.load_editions = False
         st.rerun()
 
-    saved_count = len(
-        st.session_state.saved_books
+    if current_user:
+        saved_count = len(
+            st.session_state.saved_books
+        )
+
+        if st.button(
+            f"Saved Books ({saved_count})",
+            use_container_width=True
+        ):
+            st.session_state.view = "saved"
+            st.session_state.selected_book = None
+            st.session_state.load_editions = False
+            st.rerun()
+
+        st.divider()
+
+        st.caption(
+            "Signed in as"
+        )
+        st.write(
+            f"**{current_user['email']}**"
+        )
+
+        if st.button(
+            "Logout",
+            use_container_width=True
+        ):
+            try:
+                sign_out()
+            except Exception:
+                # Even if the remote logout request has a problem,
+                # clear local app state for this browser session.
+                st.session_state.auth_user = None
+
+            st.session_state.saved_books = []
+            st.session_state.view = "search"
+            st.session_state.selected_book = None
+            st.session_state.load_editions = False
+            st.rerun()
+
+        st.caption(
+            "Favorites are still session-only "
+            "in this authentication step. "
+            "Database persistence comes next."
+        )
+
+    else:
+        if st.button(
+            "Login",
+            use_container_width=True
+        ):
+            return_view = (
+                st.session_state.view
+                if st.session_state.view
+                in ["search", "details"]
+                else "search"
+            )
+            open_login(
+                return_view
+            )
+
+        if st.button(
+            "Create Account",
+            use_container_width=True
+        ):
+            return_view = (
+                st.session_state.view
+                if st.session_state.view
+                in ["search", "details"]
+                else "search"
+            )
+            st.session_state.auth_return_view = (
+                return_view
+            )
+            st.session_state.view = "register"
+            st.rerun()
+
+        st.divider()
+        st.caption(
+            "Search is public. "
+            "Sign in to save books."
+        )
+
+
+# =========================================================
+# LOGIN VIEW
+# =========================================================
+
+
+if st.session_state.view == "login":
+    st.title("Login")
+    st.caption(
+        "Sign in to access Saved Books."
     )
+
+    with st.form(
+        "login_form"
+    ):
+        email = st.text_input(
+            "Email",
+            placeholder="you@example.com"
+        )
+
+        password = st.text_input(
+            "Password",
+            type="password"
+        )
+
+        login_submitted = (
+            st.form_submit_button(
+                "Login",
+                type="primary"
+            )
+        )
+
+    if login_submitted:
+        clean_email = email.strip()
+
+        if not clean_email or not password:
+            st.warning(
+                "Please enter your email "
+                "and password."
+            )
+        else:
+            try:
+                with st.spinner(
+                    "Signing in..."
+                ):
+                    response = sign_in(
+                        clean_email,
+                        password
+                    )
+
+                if response.user:
+                    # The next step will replace this
+                    # session list with database favorites.
+                    st.session_state.saved_books = []
+
+                    target_view = (
+                        st.session_state.auth_return_view
+                    )
+
+                    if target_view not in [
+                        "search",
+                        "details",
+                    ]:
+                        target_view = "search"
+
+                    st.session_state.view = (
+                        target_view
+                    )
+                    st.rerun()
+                else:
+                    st.error(
+                        "Login could not be completed."
+                    )
+
+            except Exception as error:
+                st.error(
+                    "Login failed."
+                )
+                st.caption(
+                    str(error)
+                )
+
+    st.write("")
 
     if st.button(
-        f"Saved Books ({saved_count})",
-        use_container_width=True
+        "Create an account"
     ):
-        st.session_state.view = "saved"
-        st.session_state.selected_book = None
-        st.session_state.load_editions = False
+        st.session_state.view = "register"
         st.rerun()
 
-    st.divider()
+    if st.button(
+        "← Back to Search"
+    ):
+        st.session_state.view = "search"
+        st.rerun()
+
+    st.stop()
+
+
+# =========================================================
+# REGISTER VIEW
+# =========================================================
+
+
+if st.session_state.view == "register":
+    st.title("Create Account")
     st.caption(
-        "Saved books are stored "
-        "for the current session."
+        "Create an account with email "
+        "and password."
     )
+
+    with st.form(
+        "register_form"
+    ):
+        email = st.text_input(
+            "Email",
+            placeholder="you@example.com"
+        )
+
+        password = st.text_input(
+            "Password",
+            type="password"
+        )
+
+        confirm_password = st.text_input(
+            "Confirm password",
+            type="password"
+        )
+
+        register_submitted = (
+            st.form_submit_button(
+                "Create Account",
+                type="primary"
+            )
+        )
+
+    if register_submitted:
+        clean_email = email.strip()
+
+        if not clean_email:
+            st.warning(
+                "Please enter an email address."
+            )
+        elif not password:
+            st.warning(
+                "Please enter a password."
+            )
+        elif password != confirm_password:
+            st.warning(
+                "Passwords do not match."
+            )
+        else:
+            try:
+                with st.spinner(
+                    "Creating account..."
+                ):
+                    response = sign_up(
+                        clean_email,
+                        password
+                    )
+
+                if response.session:
+                    st.success(
+                        "Account created and "
+                        "signed in."
+                    )
+
+                    st.session_state.saved_books = []
+
+                    target_view = (
+                        st.session_state.auth_return_view
+                    )
+
+                    if target_view not in [
+                        "search",
+                        "details",
+                    ]:
+                        target_view = "search"
+
+                    st.session_state.view = (
+                        target_view
+                    )
+                    st.rerun()
+
+                elif response.user:
+                    st.success(
+                        "Account created. "
+                        "Check your email and confirm "
+                        "your account before logging in."
+                    )
+                else:
+                    st.error(
+                        "Account could not be created."
+                    )
+
+            except Exception as error:
+                st.error(
+                    "Account creation failed."
+                )
+                st.caption(
+                    str(error)
+                )
+
+    st.write("")
+
+    if st.button(
+        "I already have an account"
+    ):
+        st.session_state.view = "login"
+        st.rerun()
+
+    if st.button(
+        "← Back to Search"
+    ):
+        st.session_state.view = "search"
+        st.rerun()
+
+    st.stop()
 
 
 # =========================================================
@@ -177,15 +487,25 @@ if (
     if (
         st.session_state.details_return_view
         == "saved"
+        and current_user
     ):
         back_label = "← Back to Saved Books"
     else:
         back_label = "← Back to Results"
 
-    if st.button(back_label):
+    if st.button(
+        back_label
+    ):
         return_view = (
             st.session_state.details_return_view
         )
+
+        if (
+            return_view == "saved"
+            and not current_user
+        ):
+            return_view = "search"
+
         st.session_state.view = return_view
         st.session_state.selected_book = None
         st.session_state.load_editions = False
@@ -195,7 +515,9 @@ if (
 
         st.rerun()
 
-    work_key = book.get("key")
+    work_key = book.get(
+        "key"
+    )
 
     if not work_key:
         st.error(
@@ -216,33 +538,41 @@ if (
             "title",
             "Unknown"
         )
+
         authors = book.get(
             "author_name",
             []
         )
+
         author = (
             authors[0]
             if authors
             else "Unknown"
         )
+
         year = book.get(
             "first_publish_year",
             "Unknown"
         )
+
         edition_count = book.get(
             "edition_count",
             "Unknown"
         )
+
         cover_id = book.get(
             "cover_i"
         )
+
         description = get_description(
             work_data
         )
+
         subjects = work_data.get(
             "subjects",
             []
         )
+
         availability_details = (
             get_availability_details(
                 book
@@ -253,7 +583,9 @@ if (
         # BOOK OVERVIEW
         # =================================================
 
-        with st.container(border=True):
+        with st.container(
+            border=True
+        ):
             col1, col2 = st.columns(
                 [1, 2.4],
                 vertical_alignment="center"
@@ -265,6 +597,7 @@ if (
                         "https://covers.openlibrary.org/"
                         f"b/id/{cover_id}-L.jpg"
                     )
+
                     st.image(
                         cover_url,
                         width=220
@@ -275,11 +608,18 @@ if (
                     )
 
             with col2:
-                st.caption("BOOK DETAILS")
-                st.title(title)
+                st.caption(
+                    "BOOK DETAILS"
+                )
+
+                st.title(
+                    title
+                )
+
                 st.write(
                     f"**Author:** {author}"
                 )
+
                 st.write("")
 
                 year_col, editions_col = (
@@ -300,36 +640,46 @@ if (
                         border=True
                     )
 
-                if is_book_saved(
-                    book,
-                    st.session_state.saved_books
-                ):
-                    if st.button(
-                        "♥ Remove from Saved",
-                        key="details_remove_saved",
-                        use_container_width=True
+                if current_user:
+                    if is_book_saved(
+                        book,
+                        st.session_state.saved_books
                     ):
-                        st.session_state.saved_books = (
-                            remove_saved_book(
-                                book,
-                                st.session_state.saved_books,
+                        if st.button(
+                            "♥ Remove from Saved",
+                            key="details_remove_saved",
+                            use_container_width=True
+                        ):
+                            st.session_state.saved_books = (
+                                remove_saved_book(
+                                    book,
+                                    st.session_state.saved_books,
+                                )
                             )
-                        )
-                        st.rerun()
+                            st.rerun()
+                    else:
+                        if st.button(
+                            "♡ Save Book",
+                            key="details_save_book",
+                            type="primary",
+                            use_container_width=True
+                        ):
+                            st.session_state.saved_books = (
+                                save_book(
+                                    book,
+                                    st.session_state.saved_books,
+                                )
+                            )
+                            st.rerun()
                 else:
                     if st.button(
-                        "♡ Save Book",
-                        key="details_save_book",
-                        type="primary",
+                        "Login to Save",
+                        key="details_login_to_save",
                         use_container_width=True
                     ):
-                        st.session_state.saved_books = (
-                            save_book(
-                                book,
-                                st.session_state.saved_books,
-                            )
+                        open_login(
+                            "details"
                         )
-                        st.rerun()
 
         st.write("")
 
@@ -337,10 +687,16 @@ if (
         # DESCRIPTION
         # =================================================
 
-        st.subheader("Description")
+        st.subheader(
+            "Description"
+        )
 
-        with st.container(border=True):
-            st.write(description)
+        with st.container(
+            border=True
+        ):
+            st.write(
+                description
+            )
 
         st.write("")
 
@@ -348,7 +704,9 @@ if (
         # SUBJECTS
         # =================================================
 
-        st.subheader("Subjects")
+        st.subheader(
+            "Subjects"
+        )
 
         if subjects:
             subject_badges = (
@@ -356,6 +714,7 @@ if (
                     subjects
                 )
             )
+
             st.markdown(
                 subject_badges
             )
@@ -370,9 +729,13 @@ if (
         # AVAILABILITY
         # =================================================
 
-        st.subheader("Availability")
+        st.subheader(
+            "Availability"
+        )
 
-        with st.container(border=True):
+        with st.container(
+            border=True
+        ):
             if not availability_details:
                 if (
                     book.get("public_scan_b")
@@ -479,11 +842,13 @@ if (
                         .rstrip("/")
                         .split("/")[-1]
                     )
+
                     availability_url = (
                         "https://openlibrary.org/"
                         f"books/"
                         f"{availability_edition_id}"
                     )
+
                     st.link_button(
                         "Open available edition",
                         availability_url
@@ -495,13 +860,18 @@ if (
         # EDITIONS
         # =================================================
 
-        st.subheader("Editions")
+        st.subheader(
+            "Editions"
+        )
 
         if not st.session_state.load_editions:
-            with st.container(border=True):
+            with st.container(
+                border=True
+            ):
                 st.write(
                     "**Want more publication details?**"
                 )
+
                 st.caption(
                     "Edition information is loaded "
                     "separately to keep this page fast."
@@ -513,6 +883,7 @@ if (
                 ):
                     st.session_state.load_editions = True
                     st.rerun()
+
         else:
             editions = []
             editions_error = None
@@ -531,6 +902,7 @@ if (
                     "entries",
                     []
                 )
+
             except requests.exceptions.RequestException as error:
                 editions_error = error
 
@@ -539,14 +911,17 @@ if (
                     "Edition information "
                     "could not be loaded."
                 )
+
                 st.caption(
                     f"Technical error: "
                     f"{editions_error}"
                 )
+
             elif not editions:
                 st.info(
                     "No edition information available."
                 )
+
             else:
                 st.caption(
                     f"Showing up to "
@@ -561,14 +936,17 @@ if (
                         "title",
                         title
                     )
+
                     publish_date = edition.get(
                         "publish_date",
                         "Unknown"
                     )
+
                     publishers = edition.get(
                         "publishers",
                         []
                     )
+
                     publisher = (
                         ", ".join(
                             publishers[:2]
@@ -576,19 +954,23 @@ if (
                         if publishers
                         else "Unknown"
                     )
+
                     pages = edition.get(
                         "number_of_pages",
                         "Unknown"
                     )
+
                     physical_format = edition.get(
                         "physical_format",
                         "Unknown"
                     )
+
                     language = (
                         get_edition_language(
                             edition
                         )
                     )
+
                     isbn = get_edition_isbn(
                         edition
                     )
@@ -613,14 +995,17 @@ if (
                                 f"**Title:** "
                                 f"{edition_title}"
                             )
+
                             st.write(
                                 f"**Publisher:** "
                                 f"{publisher}"
                             )
+
                             st.write(
                                 f"**Published:** "
                                 f"{publish_date}"
                             )
+
                             st.write(
                                 f"**Format:** "
                                 f"{physical_format}"
@@ -631,10 +1016,12 @@ if (
                                 f"**Pages:** "
                                 f"{pages}"
                             )
+
                             st.write(
                                 f"**Language:** "
                                 f"{language}"
                             )
+
                             st.write(
                                 f"**ISBN:** "
                                 f"{isbn}"
@@ -649,6 +1036,7 @@ if (
                                 "https://openlibrary.org"
                                 f"{edition_key}"
                             )
+
                             st.link_button(
                                 "Open this edition",
                                 edition_url
@@ -665,19 +1053,25 @@ if (
             .rstrip("/")
             .split("/")[-1]
         )
+
         open_library_url = (
             f"https://openlibrary.org/"
             f"works/{work_id}"
         )
 
-        st.caption("Source")
+        st.caption(
+            "Source"
+        )
+
         st.link_button(
             "Open book on Open Library",
             open_library_url
         )
 
     except requests.exceptions.RequestException as error:
-        show_request_error(error)
+        show_request_error(
+            error
+        )
 
     st.stop()
 
@@ -688,9 +1082,29 @@ if (
 
 
 if st.session_state.view == "saved":
-    st.title("Saved Books")
+    if not current_user:
+        st.warning(
+            "Please log in to access Saved Books."
+        )
+
+        if st.button(
+            "Login",
+            type="primary"
+        ):
+            open_login(
+                "search"
+            )
+
+        st.stop()
+
+    st.title(
+        "Saved Books"
+    )
+
     st.caption(
-        "Books saved during your current session."
+        "Books saved during your current "
+        "signed-in session. Database "
+        "persistence comes next."
     )
 
     if not st.session_state.saved_books:
@@ -699,6 +1113,7 @@ if st.session_state.view == "saved":
             "Search for a book and select "
             "'Save Book' to add it here."
         )
+
     else:
         st.write(
             f"**{len(st.session_state.saved_books)} "
@@ -712,24 +1127,30 @@ if st.session_state.view == "saved":
                 "title",
                 "Unknown"
             )
+
             authors_text = (
                 get_authors_text(
                     book
                 )
             )
+
             year = book.get(
                 "first_publish_year",
                 "Unknown"
             )
+
             edition_count = book.get(
                 "edition_count",
                 "Unknown"
             )
+
             cover_id = book.get(
                 "cover_i"
             )
 
-            with st.container(border=True):
+            with st.container(
+                border=True
+            ):
                 cover_col, info_col = (
                     st.columns(
                         [1, 3.5],
@@ -743,17 +1164,21 @@ if st.session_state.view == "saved":
                             "https://covers.openlibrary.org/"
                             f"b/id/{cover_id}-M.jpg"
                         )
+
                         st.image(
                             cover_url,
                             width=120
                         )
                     else:
-                        st.info("No cover")
+                        st.info(
+                            "No cover"
+                        )
 
                 with info_col:
                     st.markdown(
                         f"### {title}"
                     )
+
                     st.write(
                         f"**Author(s):** "
                         f"{authors_text}"
@@ -792,9 +1217,18 @@ if st.session_state.view == "saved":
                             type="primary",
                             use_container_width=True
                         ):
-                            st.session_state.selected_book = book
-                            st.session_state.view = "details"
-                            st.session_state.details_return_view = "saved"
+                            st.session_state.selected_book = (
+                                book
+                            )
+
+                            st.session_state.view = (
+                                "details"
+                            )
+
+                            st.session_state.details_return_view = (
+                                "saved"
+                            )
+
                             st.session_state.load_editions = False
                             st.session_state.scroll_to_details = True
                             st.rerun()
@@ -827,9 +1261,13 @@ if st.session_state.view == "saved":
 
 
 if st.session_state.view == "search":
-    st.title("Open Library Book Search")
+    st.title(
+        "Open Library Book Search"
+    )
 
-    with st.form("search_form"):
+    with st.form(
+        "search_form"
+    ):
         search_options = [
             "Title",
             "Author",
@@ -886,11 +1324,18 @@ if st.session_state.view == "search":
                         "Please enter a valid "
                         "ISBN-10 or ISBN-13."
                     )
+
                     search_is_valid = False
 
             if search_is_valid:
-                st.session_state.query = clean_query
-                st.session_state.search_by = search_by
+                st.session_state.query = (
+                    clean_query
+                )
+
+                st.session_state.search_by = (
+                    search_by
+                )
+
                 st.session_state.page = 1
                 st.session_state.searched = True
                 st.session_state.scroll_to_results = True
@@ -910,6 +1355,7 @@ if st.session_state.view == "search":
                 "docs",
                 []
             )
+
             total_results = data.get(
                 "numFound",
                 data.get(
@@ -917,6 +1363,7 @@ if st.session_state.view == "search":
                     0
                 )
             )
+
             total_pages = max(
                 1,
                 (
@@ -931,6 +1378,7 @@ if st.session_state.view == "search":
                 f'Results for '
                 f'"{st.session_state.query}"'
             )
+
             st.caption(
                 f"Searching by "
                 f"{st.session_state.search_by}"
@@ -941,6 +1389,7 @@ if st.session_state.view == "search":
                     "No books found. "
                     "Try another search."
                 )
+
             else:
                 if st.session_state.scroll_to_results:
                     current_page = (
@@ -986,24 +1435,30 @@ if st.session_state.view == "search":
                         "title",
                         "Unknown"
                     )
+
                     authors_text = (
                         get_authors_text(
                             book
                         )
                     )
+
                     year = book.get(
                         "first_publish_year",
                         "Unknown"
                     )
+
                     edition_count = book.get(
                         "edition_count",
                         "Unknown"
                     )
+
                     cover_id = book.get(
                         "cover_i"
                     )
 
-                    with st.container(border=True):
+                    with st.container(
+                        border=True
+                    ):
                         cover_col, info_col = (
                             st.columns(
                                 [1, 3.5],
@@ -1017,17 +1472,21 @@ if st.session_state.view == "search":
                                     "https://covers.openlibrary.org/"
                                     f"b/id/{cover_id}-M.jpg"
                                 )
+
                                 st.image(
                                     cover_url,
                                     width=120
                                 )
                             else:
-                                st.info("No cover")
+                                st.info(
+                                    "No cover"
+                                )
 
                         with info_col:
                             st.markdown(
                                 f"### {title}"
                             )
+
                             st.write(
                                 f"**Author(s):** "
                                 f"{authors_text}"
@@ -1067,15 +1526,38 @@ if st.session_state.view == "search":
                                     type="primary",
                                     use_container_width=True
                                 ):
-                                    st.session_state.selected_book = book
-                                    st.session_state.view = "details"
-                                    st.session_state.details_return_view = "search"
+                                    st.session_state.selected_book = (
+                                        book
+                                    )
+
+                                    st.session_state.view = (
+                                        "details"
+                                    )
+
+                                    st.session_state.details_return_view = (
+                                        "search"
+                                    )
+
                                     st.session_state.load_editions = False
                                     st.session_state.scroll_to_details = True
                                     st.rerun()
 
                             with save_col:
-                                if is_book_saved(
+                                if not current_user:
+                                    if st.button(
+                                        "Login to Save",
+                                        key=(
+                                            f"login_save_"
+                                            f"{st.session_state.page}_"
+                                            f"{index}"
+                                        ),
+                                        use_container_width=True
+                                    ):
+                                        open_login(
+                                            "search"
+                                        )
+
+                                elif is_book_saved(
                                     book,
                                     st.session_state.saved_books
                                 ):
@@ -1095,6 +1577,7 @@ if st.session_state.view == "search":
                                             )
                                         )
                                         st.rerun()
+
                                 else:
                                     if st.button(
                                         "♡ Save Book",
@@ -1143,4 +1626,6 @@ if st.session_state.view == "search":
                         st.rerun()
 
         except requests.exceptions.RequestException as error:
-            show_request_error(error)
+            show_request_error(
+                error
+            )
