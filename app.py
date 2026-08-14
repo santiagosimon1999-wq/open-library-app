@@ -10,6 +10,9 @@ from api import (
 )
 from database import (
     get_current_user,
+    load_saved_books,
+    remove_book_from_database,
+    save_book_to_database,
     sign_in,
     sign_out,
     sign_up,
@@ -24,8 +27,6 @@ from helpers import (
     is_book_saved,
     is_valid_isbn_format,
     normalize_isbn,
-    remove_saved_book,
-    save_book,
     yes_or_no,
 )
 
@@ -76,6 +77,20 @@ def open_login(return_view="search"):
     )
     st.session_state.view = "login"
     st.rerun()
+
+
+def sync_saved_books():
+    user = get_current_user()
+
+    if not user:
+        st.session_state.saved_books = []
+        return
+
+    st.session_state.saved_books = (
+        load_saved_books(
+            user["id"]
+        )
+    )
 
 
 # =========================================================
@@ -189,9 +204,8 @@ with st.sidebar:
             st.rerun()
 
         st.caption(
-            "Favorites are still session-only "
-            "in this authentication step. "
-            "Database persistence comes next."
+            "Saved Books are stored in your "
+            "account and persist across sessions."
         )
 
     else:
@@ -282,9 +296,10 @@ if st.session_state.view == "login":
                     )
 
                 if response.user:
-                    # The next step will replace this
-                    # session list with database favorites.
-                    st.session_state.saved_books = []
+                    with st.spinner(
+                        "Loading your saved books..."
+                    ):
+                        sync_saved_books()
 
                     target_view = (
                         st.session_state.auth_return_view
@@ -398,7 +413,10 @@ if st.session_state.view == "register":
                         "signed in."
                     )
 
-                    st.session_state.saved_books = []
+                    with st.spinner(
+                        "Loading your saved books..."
+                    ):
+                        sync_saved_books()
 
                     target_view = (
                         st.session_state.auth_return_view
@@ -650,13 +668,20 @@ if (
                             key="details_remove_saved",
                             use_container_width=True
                         ):
-                            st.session_state.saved_books = (
-                                remove_saved_book(
+                            try:
+                                remove_book_from_database(
+                                    current_user["id"],
                                     book,
-                                    st.session_state.saved_books,
                                 )
-                            )
-                            st.rerun()
+                                sync_saved_books()
+                                st.rerun()
+                            except Exception as error:
+                                st.error(
+                                    "Could not remove this book."
+                                )
+                                st.caption(
+                                    str(error)
+                                )
                     else:
                         if st.button(
                             "♡ Save Book",
@@ -664,13 +689,20 @@ if (
                             type="primary",
                             use_container_width=True
                         ):
-                            st.session_state.saved_books = (
-                                save_book(
+                            try:
+                                save_book_to_database(
+                                    current_user["id"],
                                     book,
-                                    st.session_state.saved_books,
                                 )
-                            )
-                            st.rerun()
+                                sync_saved_books()
+                                st.rerun()
+                            except Exception as error:
+                                st.error(
+                                    "Could not save this book."
+                                )
+                                st.caption(
+                                    str(error)
+                                )
                 else:
                     if st.button(
                         "Login to Save",
@@ -1102,9 +1134,9 @@ if st.session_state.view == "saved":
     )
 
     st.caption(
-        "Books saved during your current "
-        "signed-in session. Database "
-        "persistence comes next."
+        "Books saved to your account. "
+        "They will still be here the next "
+        "time you sign in."
     )
 
     if not st.session_state.saved_books:
@@ -1242,13 +1274,20 @@ if st.session_state.view == "saved":
                             ),
                             use_container_width=True
                         ):
-                            st.session_state.saved_books = (
-                                remove_saved_book(
+                            try:
+                                remove_book_from_database(
+                                    current_user["id"],
                                     book,
-                                    st.session_state.saved_books,
                                 )
-                            )
-                            st.rerun()
+                                sync_saved_books()
+                                st.rerun()
+                            except Exception as error:
+                                st.error(
+                                    "Could not remove this book."
+                                )
+                                st.caption(
+                                    str(error)
+                                )
 
             st.write("")
 
@@ -1570,13 +1609,20 @@ if st.session_state.view == "search":
                                         ),
                                         use_container_width=True
                                     ):
-                                        st.session_state.saved_books = (
-                                            remove_saved_book(
+                                        try:
+                                            remove_book_from_database(
+                                                current_user["id"],
                                                 book,
-                                                st.session_state.saved_books,
                                             )
-                                        )
-                                        st.rerun()
+                                            sync_saved_books()
+                                            st.rerun()
+                                        except Exception as error:
+                                            st.error(
+                                                "Could not remove this book."
+                                            )
+                                            st.caption(
+                                                str(error)
+                                            )
 
                                 else:
                                     if st.button(
@@ -1588,13 +1634,20 @@ if st.session_state.view == "search":
                                         ),
                                         use_container_width=True
                                     ):
-                                        st.session_state.saved_books = (
-                                            save_book(
+                                        try:
+                                            save_book_to_database(
+                                                current_user["id"],
                                                 book,
-                                                st.session_state.saved_books,
                                             )
-                                        )
-                                        st.rerun()
+                                            sync_saved_books()
+                                            st.rerun()
+                                        except Exception as error:
+                                            st.error(
+                                                "Could not save this book."
+                                            )
+                                            st.caption(
+                                                str(error)
+                                            )
 
                     st.write("")
 
